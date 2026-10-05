@@ -1,0 +1,36 @@
+{
+  "name": "pixel-faceplate",
+  "version": "0.1.9",
+  "description": "Drives the JSAUX Pixel Matrix Faceplate on the Steam Machine without the vendor software",
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "rollup -c -w",
+    "test": "python3 -m unittest discover -s tests -v",
+    "typecheck": "tsc --noEmit",
+    "package": "python3 scripts/package_plugin.py"
+  },
+  "keywords": ["decky", "plugin", "steam-machine", "jsaux", "faceplate"],
+  "author": "Eli Hodapp",
+  "license": "BSD-3-Clause",
+  "devDependencies": {
+    "@decky/rollup": "^1.0.2",
+    "@decky/ui": "^4.11.0",
+    "@types/react": "19.1.1",
+    "@types/react-dom": "19.1.1",
+    "@types/webpack": "^5.28.5",
+    "rollup": "^4.53.3",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "@decky/api": "^1.1.3",
+    "react-icons": "^5.3.0",
+    "tslib": "^2.7.0"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "ignoreMissing": ["react", "react-dom"]
+    }
+  }
+}

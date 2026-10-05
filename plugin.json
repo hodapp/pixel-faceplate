@@ -1,0 +1,11 @@
+{
+  "name": "Pixel Faceplate",
+  "author": "Eli Hodapp",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility", "hardware"],
+    "description": "Drives the JSAUX Pixel Matrix Faceplate on the Steam Machine without the vendor software: game artwork, the Steam logo between games, a clock, a light bar glow or your own image.",
+    "image": ""
+  }
+}
