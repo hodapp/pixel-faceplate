@@ -26,6 +26,18 @@ AURA_THRESHOLD = 24
 # 0.60 that held, since 8 s is not a long soak.
 POWER_BUDGET = 0.50
 
+# Brightness used by the "dim" sleep/shutdown action.
+SLEEP_DIM = 10
+# How often to look for GabeCubeAura's own faceplate support (a few stats).
+HANDOFF_POLL = 30.0
+# A CH340 that didn't answer like a faceplate is left alone this long.
+SILENT_RETRY = 60.0
+# How often artwork mode checks which game is running (a /proc scan; art is cached).
+ARTWORK_POLL = 5.0
+# How long sleep/shutdown handling waits for an upload or decode in progress.
+# logind's default InhibitDelayMaxSec is 5 s, so this stays well under it.
+POWER_LOCK_WAIT = 3.0
+
 
 def frame_load(rgb):
     return sum(rgb) / (len(rgb) * 255.0) if rgb else 0.0
@@ -35,10 +47,6 @@ def safe_brightness(level, load):
     if load * level / 100.0 <= POWER_BUDGET:
         return level
     return max(1, int(POWER_BUDGET * 100 / load))
-# Brightness used by the "dim" sleep/shutdown action.
-SLEEP_DIM = 10
-# How often artwork mode checks which game is running (a /proc scan; art is cached).
-ARTWORK_POLL = 5.0
 
 
 def encode_frame(rgb):
@@ -73,7 +81,8 @@ class WriteCounter:
 
 
 class FaceplateService:
-    def __init__(self, settings, logger=None, link_factory=Link, counter_path=None):
+    def __init__(self, settings, logger=None, link_factory=Link, counter_path=None, owner_check=None,
+                 on_owner_change=None):
         self.cfg = dict(settings)
         self.logger = logger
         self._link_factory = link_factory
@@ -96,12 +105,21 @@ class FaceplateService:
         self.applied_brightness = None
         self.wanted_brightness = int(self.cfg.get("brightness", 60))
         self.rotate = bool(self.cfg.get("rotate", False))
-        # Unknown until our first upload: assume the worst (it may be showing white).
+        # Unknown until the first upload: assume the worst (it may be showing white).
         self.shown_load = 1.0
         self.phase = "starting"
         self.detail = ""
         self.last_error = ""
         self.image_cache = {}
+        self._silent_port = None
+        self._silent_until = 0.0
+        # Returns the name of a plugin that now drives the faceplate itself
+        # (GabeCubeAura), or "". While it does, this plugin keeps its hands off.
+        self._owner_check = owner_check or (lambda: "")
+        # Told the new owner ("" when the panel is this plugin's again).
+        self._on_owner_change = on_owner_change or (lambda owner: None)
+        self.handed_to = ""
+        self._owner_checked = 0.0
 
     # ---- lifecycle -----------------------------------------------------
     def start(self):
@@ -116,7 +134,12 @@ class FaceplateService:
         self.wake.set()
         if self.thread:
             self.thread.join(timeout=5)
-        self._close_link()
+        locked = self.link_lock.acquire(timeout=5)
+        try:
+            self._close_link()
+        finally:
+            if locked:
+                self.link_lock.release()
 
     def configure(self, values):
         with self.lock:
@@ -138,8 +161,8 @@ class FaceplateService:
         appid = int(appid or 0)
         if running and appid:
             self.reported_app = appid
-        elif appid == self.reported_app:
-            self.reported_app = 0
+        elif not appid or appid == self.reported_app:
+            self.reported_app = 0  # app ID 0 means no game at all
         self.wake.set()
 
     def status(self):
@@ -156,6 +179,7 @@ class FaceplateService:
             "brightness_applied": self.applied_brightness,
             "appid": self.appid,
             "last_error": self.last_error,
+            "handed_to": self.handed_to,
             "settings": cfg,
         }
 
@@ -185,6 +209,8 @@ class FaceplateService:
         if not port:
             self._set("waiting", "faceplate not plugged in")
             return False
+        if self._silent_port == port and time.monotonic() < self._silent_until:
+            return False  # didn't answer last time; reopening resets some boards
         try:
             self.link = self._link_factory(log=lambda m: self._log("debug", m)).open()
         except LinkBusy as error:
@@ -196,14 +222,23 @@ class FaceplateService:
             self.link = None
             self._set("error", str(error))
             return False
-        # The screen may have been switched off at the last sleep or shutdown.
+        # Power on doubles as the check that this CH340 is a faceplate at all:
+        # plenty of other gadgets use the same chip, and nothing else is sent
+        # to a port that doesn't answer. It also wakes a screen switched off
+        # at the last sleep or shutdown.
         try:
             self.link.command(protocol.power(True), timeout=0.5, retries=2)
-        except LinkError:
-            pass
-        # A fresh link (or a replugged panel) gets the current picture once.
+        except (LinkError, OSError):
+            self._close_link()
+            self._silent_port, self._silent_until = port, time.monotonic() + SILENT_RETRY
+            self._set("error", "no faceplate answered on %s" % port)
+            return False
+        self._silent_port = None
+        # A fresh link (or a replugged panel) gets the current picture once,
+        # and something else may have stored a bright picture meanwhile.
         self.last_hash = None
         self.last_aura = None
+        self.shown_load = 1.0
         return True
 
     def _apply_brightness(self, level):
@@ -335,6 +370,18 @@ class FaceplateService:
             cfg = dict(self.cfg)
         if self.asleep:
             return 5.0  # the system is going down; don't wake the screen
+        now = time.monotonic()
+        if not self._owner_checked or now - self._owner_checked >= HANDOFF_POLL:
+            self._owner_checked = now
+            owner = self._owner_check()
+            if owner != self.handed_to:
+                self.handed_to = owner
+                self._on_owner_change(owner)
+        if self.handed_to:
+            self._close_link()
+            self.last_hash = None  # redraw if this plugin ever takes over again
+            self._set("handed over", "%s drives the faceplate now" % self.handed_to)
+            return HANDOFF_POLL
         if cfg["mode"] == "off":
             self._close_link()  # release the port so other tools can use it
             self._set("off", "panel keeps its last picture")
@@ -357,10 +404,18 @@ class FaceplateService:
         """Steam Machine about to sleep/shut down (starting) or back again. Must be quick."""
         with self.lock:
             cfg = dict(self.cfg)
-        if cfg["mode"] == "off":
-            return  # the panel is not ours to touch
+        if cfg["mode"] == "off" or self.handed_to:
+            return  # leave the panel alone
         action = cfg["sleep_action"] if kind == "sleep" else cfg["shutdown_action"]
-        with self.link_lock:
+        if not self.link_lock.acquire(timeout=POWER_LOCK_WAIT):
+            # Mid-upload: don't hold the system up. The worker checks asleep
+            # before its next picture, so nothing new goes out.
+            self.asleep = starting
+            self._log("warning", "panel busy at %s; left as it is" % kind)
+            if not starting:
+                self.wake.set()
+            return
+        try:
             if starting:
                 self.asleep = True
                 if action == "keep" or not self._ensure_link():
@@ -377,6 +432,8 @@ class FaceplateService:
                 if self._ensure_link():
                     self.link.command(protocol.power(True), timeout=0.5, retries=2)
                 self.wake.set()
+        finally:
+            self.link_lock.release()
 
     def _run(self):
         while not self.stop_event.is_set():

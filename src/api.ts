@@ -29,7 +29,7 @@ export interface GameProfile {
 }
 
 export interface Status {
-  phase: "starting" | "off" | "waiting" | "running" | "asleep" | "busy" | "error";
+  phase: "starting" | "off" | "waiting" | "running" | "asleep" | "busy" | "handed over" | "error";
   detail: string;
   connected: boolean;
   port: string;
@@ -39,6 +39,8 @@ export interface Status {
   brightness_applied: number | null;
   appid: number;
   last_error: string;
+  // Set when another plugin (GabeCubeAura) has built-in faceplate support.
+  handed_to: string;
   settings: Settings;
 }
 

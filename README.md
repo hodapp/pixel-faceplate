@@ -168,6 +168,10 @@ This plugin exists as quickly as it does because of [GabeCubeAura](https://githu
 
 Reading its source taught me most of what I needed to know about building a Decky plugin for the Steam Machine: how to structure the backend, how to tell which game is running (Steam's launch and exit events, with a fallback), and where Steam keeps game artwork, including SteamGridDB custom art and the newer cache layout. Pixel Faceplate's code is new, but on those points it follows GabeCubeAura's approach, and the two plugins pick the same artwork for the same game. GabeCubeAura is BSD-3-Clause licensed. Thank you, Alyenax.
 
+### If GabeCubeAura runs the faceplate
+
+I've offered GabeCubeAura the faceplate code so it can drive the panel itself. If it ever does, this plugin gets out of the way on its own: once it sees a GabeCubeAura that drives the faceplate, it lets go of the panel, stops sending pictures and stops handling sleep, and its panel just tells you to set things up in GabeCubeAura and uninstall Pixel Faceplate. If you switch GabeCubeAura off in Decky, this plugin takes over again.
+
 ## License
 
 BSD-3-Clause. Not affiliated with JSAUX or Valve.

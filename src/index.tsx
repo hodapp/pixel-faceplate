@@ -10,7 +10,7 @@ import {
   staticClasses,
 } from "@decky/ui";
 import { FileSelectionType, definePlugin, openFilePicker } from "@decky/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MdGridOn } from "react-icons/md";
 
 import {
@@ -30,6 +30,8 @@ import {
 } from "./api";
 
 const POLL_MS = 1000;
+// Brightness goes to the panel once the slider stops, not at every step.
+const SLIDER_SETTLE_MS = 400;
 
 const MODES: { data: Mode; label: string }[] = [
   { data: "off", label: "Off (leave panel alone)" },
@@ -74,7 +76,11 @@ const COLORS = [
 
 function Content() {
   const [status, setStatus] = useState<Status | null>(null);
+  // A failed save stays on screen; the next successful poll only clears its own errors.
   const [error, setError] = useState("");
+  const [pollError, setPollError] = useState("");
+  const [brightness, setBrightness] = useState<number | null>(null);
+  const brightnessTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,10 +89,10 @@ function Content() {
         const next = await getStatus();
         if (!cancelled) {
           setStatus(next);
-          setError("");
+          setPollError("");
         }
       } catch (e) {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setPollError(String(e));
       }
     };
     refresh();
@@ -94,6 +100,7 @@ function Content() {
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      window.clearTimeout(brightnessTimer.current);
     };
   }, []);
 
@@ -119,7 +126,21 @@ function Content() {
     return (
       <PanelSection>
         <PanelSectionRow>
-          <Field label={error ? `Backend error: ${error}` : "Loading..."} focusable={false} />
+          <Field label={error || pollError ? `Backend error: ${error || pollError}` : "Loading..."} focusable={false} />
+        </PanelSectionRow>
+      </PanelSection>
+    );
+  }
+
+  if (status.handed_to) {
+    return (
+      <PanelSection title="Moved to GabeCubeAura">
+        <PanelSectionRow>
+          <Field
+            label={`${status.handed_to} runs the faceplate now`}
+            description={`Faceplate support is built into ${status.handed_to} now. Set it up there, then uninstall Pixel Faceplate (Decky settings > Plugins). This plugin has stopped sending anything to the panel.`}
+            focusable={false}
+          />
         </PanelSectionRow>
       </PanelSection>
     );
@@ -162,12 +183,18 @@ function Content() {
         <PanelSectionRow>
           <SliderField
             label="Brightness"
-            value={s.brightness}
+            value={brightness ?? s.brightness}
             min={0}
             max={100}
             step={5}
             showValue
-            onChange={(value) => save({ brightness: value })}
+            onChange={(value) => {
+              setBrightness(value);
+              window.clearTimeout(brightnessTimer.current);
+              brightnessTimer.current = window.setTimeout(() => {
+                void save({ brightness: value }).finally(() => setBrightness(null));
+              }, SLIDER_SETTLE_MS);
+            }}
           />
         </PanelSectionRow>
         {status.brightness_applied !== null && status.brightness_applied < s.brightness && (
@@ -320,9 +347,9 @@ function Content() {
             {status.uploads} / {status.lifetime_uploads}
           </Field>
         </PanelSectionRow>
-        {(error || status.last_error) && (
+        {(error || pollError || status.last_error) && (
           <PanelSectionRow>
-            <Field label="Error" description={error || status.last_error} focusable={false} />
+            <Field label="Error" description={error || pollError || status.last_error} focusable={false} />
           </PanelSectionRow>
         )}
       </PanelSection>

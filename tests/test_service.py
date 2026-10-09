@@ -1,5 +1,6 @@
 # Service behaviour against a fake faceplate: write economy, brightness, off mode, link loss.
 
+import json
 import os
 import sys
 import tempfile
@@ -137,7 +138,7 @@ class ServiceTests(unittest.TestCase):
     def test_already_stored_is_not_counted(self):
         svc = make("clock")
         svc.step()
-        svc.last_hash = None  # e.g. a reconnect: we resend, the panel skips it
+        svc.last_hash = None  # e.g. a reconnect: sent again, the panel skips it
         svc.step()
         self.assertEqual(svc.uploads, 1)
         self.assertEqual(svc.counter.total, 1)
@@ -273,6 +274,54 @@ class ServiceTests(unittest.TestCase):
             svc.step()
         self.assertEqual(len(sent), 2)
         self.assertEqual(sent[1], render.rotate(sent[0]))
+
+    def test_ch340_that_does_not_answer_is_left_alone(self):
+        class SilentLink(FakeLink):
+            def command(self, data, timeout=1.0, retries=3):
+                raise LinkError("no reply")
+
+        svc = service.FaceplateService(dict(DEFAULTS, mode="clock"), link_factory=SilentLink)
+        svc.step()
+        self.assertEqual(svc.phase, "error")
+        self.assertIn("no faceplate answered", svc.detail)
+        self.assertIsNone(svc.link)
+        self.assertEqual(SilentLink.instances[0].gifs, [])
+        svc.step()
+        self.assertEqual(len(SilentLink.instances), 1)  # not reopened straight away
+
+    def test_reconnect_assumes_a_bright_picture_again(self):
+        svc = make("clock", brightness=100)
+        svc.step()
+        self.assertLess(svc.shown_load, 0.5)  # the clock is mostly black
+        FakeLink.port = "/dev/ttyUSB1"  # replugged
+        try:
+            with mock.patch.object(service, "find_port", lambda: "/dev/ttyUSB1"):
+                svc._ensure_link()
+        finally:
+            FakeLink.port = "/dev/ttyUSB0"
+        self.assertEqual(svc.shown_load, 1.0)
+
+    def test_sleep_does_not_wait_behind_an_upload(self):
+        import threading
+        svc = make("clock")
+        svc.step()
+        held, release = threading.Event(), threading.Event()
+
+        def hold():
+            with svc.link_lock:
+                held.set()
+                release.wait(5)
+
+        worker = threading.Thread(target=hold)
+        worker.start()
+        held.wait(1)
+        try:
+            with mock.patch.object(service, "POWER_LOCK_WAIT", 0.05):
+                svc.power_event("sleep", True)
+            self.assertTrue(svc.asleep)
+        finally:
+            release.set()
+            worker.join()
 
     def test_busy_port_waits_without_an_error(self):
         class BusyLink(FakeLink):
@@ -414,6 +463,78 @@ class RenderTests(unittest.TestCase):
                     with open(os.path.join(d, name), "w") as handle:
                         handle.write(value)
             self.assertEqual(render.read_lightbar(root), [(128, 0, 0), (0, 0, 128)])
+            self.assertEqual(render.read_lightbar(root, reverse=True), [(0, 0, 128), (128, 0, 0)])
+
+
+class HandoffTests(unittest.TestCase):
+    def _plugin(self, plugins, folder, name, faceplate=True):
+        package = os.path.join(plugins, folder, "py_modules", "signalbar", "faceplate" if faceplate else "renderer")
+        os.makedirs(package, exist_ok=True)
+        if faceplate:
+            open(os.path.join(package, "__init__.py"), "w").close()
+        with open(os.path.join(plugins, folder, "plugin.json"), "w") as handle:
+            json.dump({"name": name}, handle)
+
+    def test_finds_gabecubeaura_with_faceplate_support(self):
+        from pixelface.handoff import faceplate_owner
+        with tempfile.TemporaryDirectory() as home:
+            plugins = os.path.join(home, "plugins")
+            self._plugin(plugins, "GabeCubeAura", "GabeCubeAura", faceplate=False)
+            self.assertEqual(faceplate_owner(plugins), "")  # an older release without it
+            self._plugin(plugins, "GabeCubeAura", "GabeCubeAura")
+            self.assertEqual(faceplate_owner(plugins), "GabeCubeAura")
+
+    def test_disabled_in_decky_does_not_count(self):
+        from pixelface.handoff import faceplate_owner
+        with tempfile.TemporaryDirectory() as home:
+            plugins = os.path.join(home, "plugins")
+            self._plugin(plugins, "GabeCubeAura", "GabeCubeAura")
+            os.makedirs(os.path.join(home, "settings"))
+            with open(os.path.join(home, "settings", "loader.json"), "w") as handle:
+                json.dump({"disabled_plugins": ["GabeCubeAura"]}, handle)
+            self.assertEqual(faceplate_owner(plugins), "")
+
+    def test_live_claim_counts_and_a_dead_one_does_not(self):
+        from pixelface.handoff import faceplate_owner
+        with tempfile.TemporaryDirectory() as home:
+            plugins = os.path.join(home, "plugins")
+            os.makedirs(plugins)
+            proc = os.path.join(home, "proc")
+            os.makedirs(os.path.join(proc, "4242"))
+            with open(os.path.join(proc, "4242", "cmdline"), "wb") as handle:
+                handle.write(b"GabeCubeAura (/home/deck/homebrew/plugins/GabeCubeAura/main.py)\0")
+            claim_dir = os.path.join(home, "settings", "GabeCubeAura")
+            os.makedirs(claim_dir)
+            with open(os.path.join(claim_dir, "faceplate-claim.json"), "w") as handle:
+                json.dump({"plugin": "GabeCubeAura", "pid": 4242}, handle)
+            self.assertEqual(faceplate_owner(plugins, proc_root=proc), "GabeCubeAura")
+            with open(os.path.join(claim_dir, "faceplate-claim.json"), "w") as handle:
+                json.dump({"plugin": "GabeCubeAura", "pid": 999}, handle)  # crashed: no such process
+            self.assertEqual(faceplate_owner(plugins, proc_root=proc), "")
+
+    @mock.patch.object(service, "find_port", lambda: "/dev/ttyUSB0")
+    @mock.patch.object(service, "MIN_UPLOAD_GAP", 0)
+    def test_service_lets_go_and_comes_back(self):
+        owner = ["GabeCubeAura"]
+        FakeLink.instances.clear()
+        changes = []
+        svc = service.FaceplateService(
+            dict(DEFAULTS, mode="clock"), link_factory=FakeLink, owner_check=lambda: owner[0],
+            on_owner_change=changes.append,
+        )
+        self.assertEqual(svc.step(), service.HANDOFF_POLL)
+        self.assertEqual(svc.phase, "handed over")
+        self.assertEqual(svc.status()["handed_to"], "GabeCubeAura")
+        self.assertEqual(FakeLink.instances, [])  # never opened the port
+        svc.power_event("sleep", True)
+        svc.power_event("sleep", False)
+        self.assertEqual(FakeLink.instances, [])  # sleep and wake leave the panel alone too
+        owner[0] = ""
+        svc._owner_checked = 0.0
+        svc.step()
+        self.assertEqual(svc.phase, "running")
+        self.assertEqual(len(FakeLink.instances[0].gifs), 1)
+        self.assertEqual(changes, ["GabeCubeAura", ""])  # once each way, so the sleep hook follows
 
 
 if __name__ == "__main__":

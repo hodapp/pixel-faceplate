@@ -10,6 +10,7 @@ import decky
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_modules"))
 
 from pixelface import __version__  # noqa: E402
+from pixelface.handoff import faceplate_owner  # noqa: E402
 from pixelface.power_events import PowerEvents  # noqa: E402
 from pixelface.service import FaceplateService  # noqa: E402
 from pixelface.settings import SettingsStore  # noqa: E402
@@ -22,14 +23,29 @@ class Plugin:
         if self.settings.load_error:
             decky.logger.warning("[Pixel Faceplate] " + self.settings.load_error)
         counter = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "writes.json")
-        self.service = FaceplateService(self.settings.values, decky.logger, counter_path=counter)
-        self.service.start()
-        self.power = PowerEvents(self.service.power_event, decky.logger)
+        plugins_dir = os.path.dirname(decky.DECKY_PLUGIN_DIR)
+        self.power = PowerEvents(self.service_power_event, decky.logger)
+        self.service = FaceplateService(
+            self.settings.values, decky.logger, counter_path=counter,
+            owner_check=lambda: faceplate_owner(plugins_dir),
+            on_owner_change=self._owner_changed,
+        )
         self.power.start()
+        self.service.start()
         decky.logger.info(
             "[Pixel Faceplate] v%s loaded as uid %d, mode=%s"
             % (__version__, os.getuid(), self.settings.values["mode"])
         )
+
+    def service_power_event(self, kind, starting):
+        self.service.power_event(kind, starting)
+
+    def _owner_changed(self, owner):
+        """While GabeCubeAura drives the panel this plugin holds no sleep delay lock either."""
+        if owner:
+            self.power.stop()
+        else:
+            self.power.start()
 
     async def _unload(self):
         self.power.stop()
