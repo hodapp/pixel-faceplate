@@ -79,7 +79,7 @@ Near the USB-C socket there's a WCH CH340N, the USB serial chip.
 
 ![The CH340N next to the USB-C socket](ch340n-u36.jpg)
 
-And the interesting corner: the microcontroller, a 48-pin chip next to a 24 MHz crystal. Its top has been sanded blank, so there's no part number. Next to it is the 25Q016B flash chip and a row of pads labelled V, DM, DP, G and L.
+And the interesting corner: the microcontroller, a 48-pin chip next to a 24 MHz crystal. Its top has been sanded blank, so there's no part number. Next to it is the 25Q016B flash chip and a row of pads labeled V, DM, DP, G and L.
 
 ![The unmarked microcontroller, the flash chip and the pad row](mcu-flash-pads.jpg)
 
@@ -149,9 +149,15 @@ A word of warning: the plugin is one morning's work, tested only on my own Steam
 
 People have said the faceplate sits very close to the Steam Machine. I stacked two extra 6x2 mm magnets (the kind Gridfinity bins use) on each of its magnet points. That's about 4 mm more gap, it still holds firmly, and air gets through all the way around.
 
-## Open questions
+## The diffuser
 
-I'm assuming good intentions here. JSAUX's spec sheet promises open-source code support, and they've said they plan to open source this. It's easy to do useful things with what they've exposed, but the sanded chip and the lack of any firmware access make it hard to go further. These are the things I'd most like to know:
+There's a white diffuser sheet between the LEDs and the smoked clear front. While I had the back off I took it out. Without it every LED is a sharp dot, the picture is noticeably brighter, and the smoked front still covers the LEDs. The catch is viewing angle. Straight on it looks much better, but from most other angles it looks a lot worse, because the diffuser was what spread the light out sideways. It doesn't change how much power the panel draws, so the brightness limit below still applies.
+
+![The faceplate without its diffuser sheet, showing game art next to the TV](no-diffuser.jpg)
+
+## Asking JSAUX
+
+I emailed JSAUX with the flash and brownout findings, a note about the AI agent screen, and the questions I most wanted answered:
 
 1. Is there a way to show a picture without writing it to flash? That would make live modes, and a proper screen mirror, safe.
 2. How does the firmware store uploads: the same sector every time, or spread across the chip?
@@ -159,6 +165,51 @@ I'm assuming good intentions here. JSAUX's spec sheet promises open-source code 
 4. Will firmware updates come over the normal USB connection?
 5. Is there protocol documentation, and when will the source be out?
 
-Overall, it's a really cool piece of kit, and it'll get a lot cooler once JSAUX publishes the source and a way to update the firmware. At that point there's no reason we couldn't stream straight to the screen without touching flash. It might be possible to get there sooner with a chip reader on the flash or the microcontroller, but that's risky, and JSAUX could post a GitHub link any day, so I'm going to wait.
+Their support team answered a couple of days later. They thanked me, said they'd passed the feedback and questions to their technical team, and then: "Regarding open-source content and protocol details, we are unable to disclose specific information at this time." Polite, and fair enough from a support inbox. It also isn't a yes, and there's no date on it.
+
+## Trying the pads
+
+So I went back in to see how far I could get without a soldering iron. Not far, as it turns out.
+
+The V, DM, DP, G and L pads next to the microcontroller sit about 2 mm apart. With the panel running, V reads 5 V (USB power in), G is ground, L sits at 3.3 V, and DM and DP sit at about zero. Nothing pulls DP up, so the chip's own USB isn't switched on in normal use.
+
+- Shorting L to G with tweezers while the panel ran did nothing. I had a script asking the panel "are you there?" five times a second, and it never missed a reply, so L isn't the reset pin.
+- Holding L to G while plugging the panel in started a factory test pattern: red, green, blue and white in turn, then scanning lines, on a loop. That's the closest thing to a result I got. The catch is that the panel saves it, so it came back on its own the next time I plugged it in. Command `F0 00`, which JSAUX's own daemon sends before every upload, turns it off again.
+- I asked the panel's serial port, in the two common bootloader dialects, whether a bootloader was listening, both on a normal start and with L held. No answer either time.
+- I held a stripped USB cable onto DM, DP and G with Kapton tape and watched for any new USB device on a normal start and with L held. Nothing ever showed up. Yes, tape. I checked continuity on every wire first, so it was all connected. It just didn't seem worth getting the soldering iron out for a quick test I suspected wouldn't work anyway.
+
+Nothing in any of this wrote to the panel except that saved test mode, and the firmware answered normally the whole time.
+
+A word of warning if you try the L trick: the test pattern includes full-screen white at whatever brightness is stored, which is the picture that browned my panel out on USB-A. Do it on USB-C, and send `F0 00` afterwards (`tools/bootprobe.py PORT testoff` does that).
+
+## A few more commands
+
+Back on the cable, I went through the commands JSAUX's own software knows about but never really uses.
+
+`21` turned out to pick from four animations built into the firmware: the rainbow triangle, a spinning d20 that morphs as it turns, a blue sunburst, and a car driving through the desert. JSAUX's app has a command with the same number, but it never sends it to the panel; its "modes" are screens the app draws itself.
+
+`F0`, the factory test command, picks single test screens: solid red, green, blue and white, three kinds of moving lines, and one that shows the firmware version. Mine says `V1.1`. `F0 FF` runs the whole cycle, the same one the L pad starts, and `F0 00` ends it. The full tables are in [PROTOCOL.md](../PROTOCOL.md).
+
+Then I hit the one that made me stop. I'd been treating `03` as the command that sets the built-in clock, and was trying date layouts on it. Two of them got a reply I hadn't seen before, and a little later the panel blinked a white document icon with a red down arrow and a red X, then went back to its animation.
+
+![The panel showing a document icon, a red down arrow and a red X](download-failed.jpg)
+
+That's a "download failed" screen. As far as I can tell, `03` starts some kind of file transfer, the panel waited for data that never came, and it gave up. It could be pictures or fonts, but a firmware update over the normal cable seems the most likely. Nothing was written and the panel was fine afterwards.
+
+It's good to know the firmware can take a download at all. It's also where I'm stopping. Giving up when nothing arrives is the easy part. What I can't tell from the outside is what it does when something does arrive, and a lot of cheap devices handle updates crudely: erase the old firmware first, then write the new one, and hope. If this panel works like that, one wrong guess wipes it, and there's no way to put the firmware back. So `03` is off limits until I have a backup and a real plan.
+
+## Where that leaves things
+
+I'm still willing to assume good intent from JSAUX. But here's what their product page says:
+
+> 【App Control and Custom Content】Control either display with the companion app. Choose from preset display modes or upload your own images. For developers, the Pixel Matrix Panel also supports open-source code for creating custom multi-zone layouts. (App interface and available display modes may vary)
+
+I don't know what open-source support there actually is at this point, beyond people reverse engineering JSAUX's software and getting things more or less working, which is what I did. And the hardware points the other way. The microcontroller's part number is sanded off, the factory pads don't open anything without a soldering iron, nothing answers as a bootloader over the cable, and the software can't update the firmware. If this was built to be an open platform, that seems suspect. Maybe the source shows up and it all makes sense. I'm not counting on it making going deeper easy.
+
+What's left is a chip clip on the 25Q016B flash chip, which is a SOIC-8 and can be read without soldering. That won't give me the microcontroller's program, which probably lives inside the chip itself, but it should show how pictures are laid out in flash, and that answers the wear question: dump it, upload a few pictures, dump it again and see what moved. I've ordered a clip and I'll write up whatever turns up.
+
+So this is a natural stopping point. Everything I could try safely, I've tried. The commands that are left are either unknown, or the update path, and guessing at either one is how you brick a panel that has no recovery.
+
+Overall, it's a really cool piece of kit, and it'd get a lot cooler with the source and a way to update the firmware. With those there's no reason we couldn't stream straight to the screen without touching flash. Until then, I'm waiting on JSAUX, and on the clip.
 
 If you have answers, or one of these faceplates and a different result, open an issue.

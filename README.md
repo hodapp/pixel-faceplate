@@ -143,6 +143,7 @@ I measured the limit on USB-A with solid white: brightness 40, 50 and 60 each he
 - If the panel says "Faceplate not found", check the cable and make sure nothing else has the serial port open (the JSAUX daemon, for example). The panel shows up as a CH340 serial device, `1a86:7523`.
 - If the panel keeps restarting, flashing or showing glitchy lines, it's probably starting up into a picture that's too bright for the port. Copy this repo's `tools` and `py_modules` folders to the Steam Machine, run `python3 tools/rescue.py` from that folder, then plug the panel into the USB-C port. The script turns the screen off the moment the panel appears, stores a black picture and turns the screen back on. After that it's safe to go back to USB-A.
 - If the status says the faceplate is in use by another app, something else is driving it, usually GabeCubeAura's faceplate support. Only one can have it at a time; turn one of them off and the other picks it up within a few seconds.
+- If the panel cycles through red, green, blue and white with scanning lines, it's in its factory test mode (holding the L pad on the board to ground at power-up starts it, and it stays on across restarts). From this repo's folder, run `python3 tools/bootprobe.py /dev/ttyUSB0 testoff` with the plugin set to Off. The test pattern includes full white, so if the panel keeps restarting on USB-A, do this on the USB-C port.
 - The plugin logs to Decky's log: `journalctl -u plugin_loader | grep "Pixel Faceplate"`
 
 ## How it works
@@ -162,7 +163,7 @@ pnpm test         # Python tests (the GIF round-trip tests also want Pillow)
 pnpm package      # out/Pixel-Faceplate-v<version>.zip
 ```
 
-`tools/` holds the scripts used to work out the protocol: `probe.py` (send commands by hand), `scan.py`, `sizetime.py`, `steptest.py` and `rescue.py`. Read their headers before running them. A few of them write to the panel's flash or push it towards its power limit on purpose.
+`tools/` holds the scripts used to work out the protocol: `probe.py` (send commands by hand), `scan.py`, `sizetime.py`, `steptest.py`, `rescue.py` and `bootprobe.py` (looks for a bootloader, and turns factory test mode off). Read their headers before running them. A few of them write to the panel's flash or push it towards its power limit on purpose.
 
 ## Thanks, GabeCubeAura
 
