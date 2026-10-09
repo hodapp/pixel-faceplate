@@ -6,6 +6,8 @@ A Decky plugin for the [JSAUX Pixel Matrix Faceplate](https://jsaux.com/products
 
 > **Use at your own risk.** I put this together over coffee one morning, poking at the faceplate, and it has only been tested on my own Steam Machine, doing what I do with it. You're welcome to install it and use it, but I don't consider it ready for wide distribution and I'm not submitting it to the Decky store. I'm old as dirt and was a software engineer in a past life. These days I do this for fun, including a lot of custom ESP32 firmware for smart home stuff around my house, so I think it's in decent shape. I'm mostly sharing it so the next person who wants to do cool stuff with this panel doesn't have to start from scratch. Still, it talks directly to hardware that stores everything in flash and can brown out a USB port. You've been warned.
 
+> **This is most likely the last version.** I'm still working on the hardware side, but anything new will go to [GabeCubeAura](https://github.com/Alyenax/GabeCubeAura) as pull requests instead of into this plugin. Updating this one by hand is a pain, and GabeCubeAura seems like a better home for it. Whether GabeCubeAura takes faceplate support is up to its author. If it does, this plugin steps aside on its own (0.2.1 or newer) and you can uninstall it. Until then, update this one or leave it as it is, whichever you like.
+
 ## TL;DR
 
 ### What you need
@@ -78,6 +80,12 @@ systemctl --user disable --now jsaux-matrix-hub
 2. Open the Quick Access menu, go to Decky, and select Pixel Faceplate.
 3. Change Mode from Off to Game artwork.
 4. The Status section should say Connected. Start a game and its artwork should show up on the faceplate within a few seconds.
+
+### Updating
+
+The plugin doesn't update itself, and it isn't in the Decky store, so nothing will tell you when there's a new version. To update, download the newest `Pixel-Faceplate-v<version>.zip` from the [Releases page](https://github.com/hodapp/pixel-faceplate/releases) and install it the same way as step 5. It replaces the old version. Your settings are stored separately by Decky, so they carry over. The version you're running is shown in Decky's plugin list.
+
+It's worth updating to at least 0.2.1. That's the version that steps aside on its own once GabeCubeAura can drive the faceplate (see [If GabeCubeAura runs the faceplate](#if-gabecubeaura-runs-the-faceplate)).
 
 ### Uninstalling
 

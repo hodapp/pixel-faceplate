@@ -151,9 +151,21 @@ People have said the faceplate sits very close to the Steam Machine. I stacked t
 
 ## The diffuser
 
-There's a white diffuser sheet between the LEDs and the smoked clear front. While I had the back off I took it out. Without it every LED is a sharp dot, the picture is noticeably brighter, and the smoked front still covers the LEDs. The catch is viewing angle. Straight on it looks much better, but from most other angles it looks a lot worse, because the diffuser was what spread the light out sideways. It doesn't change how much power the panel draws, so the brightness limit below still applies.
+There's a white diffuser sheet between the LEDs and the smoked clear front. While I had the back off I took it out. Without it every LED is a sharp dot, the picture is noticeably brighter, and the smoked front still covers the LEDs. The catch is viewing angle. Straight on it looks much better, but from most other angles it looks a lot worse, because the diffuser was what spread the light out sideways. The LEDs blast straight forward, and I totally understand why they put it in. If your Steam Machine sits on a shelf off to the side and you see it at an angle, I'd keep the diffuser. If you look at it straight on, it looks pretty cool without it. It doesn't change how much power the panel draws, so the brightness limit below still applies.
+
+It's easy to take out and easy to put back:
+
+1. Unplug the faceplate and lay it screen down.
+2. Take out the four screws on the back with a size 0 Phillips screwdriver.
+3. The back plate clips into the front. Work a guitar pick or another thin, soft piece of plastic into the seam on one side (the iFixit kit has everything you need), then lift it up towards you, not quite to 90 degrees. That pries the front away from the clips. Once a couple of clips let go, the back comes right off.
+4. There's one more Phillips screw next to the USB-C port. It's a different length from the four on the back, so keep it separate.
+5. The circuit board should be loose now. Lift it out by its edges and try not to touch the contacts.
+6. Under it is the white diffuser sheet. Lift a corner with your pick and take it out.
+7. Put it back together in the reverse order.
 
 ![The faceplate without its diffuser sheet, showing game art next to the TV](no-diffuser.jpg)
+
+It looks better in person than in this photo. Without the diffuser it's hard to photograph, and all those bright LEDs confuse my iPhone's color balance.
 
 ## Asking JSAUX
 
