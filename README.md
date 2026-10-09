@@ -96,6 +96,8 @@ Quick Access menu > Decky > gear > Plugins, find Pixel Faceplate, and uninstall 
 
   The logo can go at the top, center or bottom, in any style that shows it. The shading follows it.
 
+  ![Dark Souls II's logo on its own at the bottom of the faceplate, with GabeCubeAura's light bar glowing under it](docs/logo-only-with-light-bar.jpg)
+
   Style and logo position apply to every game unless you say otherwise. While a game is running, turn on "Just for" that game and the two settings below it change for that game only. It starts from your usual choices, so nothing changes until you pick something. Turn it off and the game goes back to your usual style. Everything else (brightness, upside down, sleep) is for the whole console.
 
   ![The Steam logo on the faceplate between games, with GabeCubeAura's controller battery meter on the light bar](docs/idle-steam-logo.jpg)
