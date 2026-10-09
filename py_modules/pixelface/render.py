@@ -49,23 +49,23 @@ class Canvas:
     def __init__(self, fill=(0, 0, 0)):
         self.px = bytearray(bytes(fill) * (WIDTH * HEIGHT))
 
-    def set(self, x, y, colour):
+    def set(self, x, y, color):
         if 0 <= x < WIDTH and 0 <= y < HEIGHT:
             i = 3 * (y * WIDTH + x)
-            self.px[i:i + 3] = bytes(colour)
+            self.px[i:i + 3] = bytes(color)
 
-    def rect(self, x, y, w, h, colour):
+    def rect(self, x, y, w, h, color):
         for yy in range(y, y + h):
             for xx in range(x, x + w):
-                self.set(xx, yy, colour)
+                self.set(xx, yy, color)
 
-    def text(self, x, y, string, colour, font=SMALL, scale=1, gap=1):
+    def text(self, x, y, string, color, font=SMALL, scale=1, gap=1):
         for ch in string:
             glyph = font.get(ch, font.get(" ", ["0"]))
             for gy, row in enumerate(glyph):
                 for gx, bit in enumerate(row):
                     if bit == "1":
-                        self.rect(x + gx * scale, y + gy * scale, scale, scale, colour)
+                        self.rect(x + gx * scale, y + gy * scale, scale, scale, color)
             x += (len(glyph[0]) + gap) * scale
         return x
 
@@ -77,23 +77,23 @@ class Canvas:
         return bytes(self.px)
 
 
-def clock(now=None, colour=(255, 140, 20), use_24h=False):
+def clock(now=None, color=(255, 140, 20), use_24h=False):
     now = time.localtime(now)
     canvas = Canvas()
     hour = now.tm_hour if use_24h else (now.tm_hour % 12 or 12)
     hhmm = "%d:%02d" % (hour, now.tm_min) if not use_24h else "%02d:%02d" % (hour, now.tm_min)
     width = Canvas.text_width(hhmm, BIG, 2)
-    canvas.text((WIDTH - width) // 2, 12, hhmm, colour, BIG, 2)
+    canvas.text((WIDTH - width) // 2, 12, hhmm, color, BIG, 2)
     line = "%d/%d" % (now.tm_mon, now.tm_mday)
     if not use_24h:
         line += " " + ("AM" if now.tm_hour < 12 else "PM")
-    dim = tuple(c // 3 for c in colour)
+    dim = tuple(c // 3 for c in color)
     canvas.text((WIDTH - Canvas.text_width(line)) // 2, 34, line, dim)
     return canvas.bytes()
 
 
 def read_lightbar(root="/sys/class/leds"):
-    """Colours of the Steam Machine light bar, left to right, scaled by brightness."""
+    """Colors of the Steam Machine light bar, left to right, scaled by brightness."""
     leds = []
     for path in glob.glob(os.path.join(root, "valve-leds[[]*[]]")):
         try:
@@ -110,19 +110,19 @@ def read_lightbar(root="/sys/class/leds"):
     return [c for _, c in sorted(leds)]
 
 
-def aura(colours):
-    """A soft glow: light bar colours spread across the width, fading toward the top."""
-    if not colours:
+def aura(colors):
+    """A soft glow: light bar colors spread across the width, fading toward the top."""
+    if not colors:
         return bytes(FRAME_BYTES)
     out = bytearray(FRAME_BYTES)
-    n = len(colours)
+    n = len(colors)
     row = []
     for x in range(WIDTH):
         pos = x * (n - 1) / (WIDTH - 1) if n > 1 else 0
         a = int(pos)
         b = min(n - 1, a + 1)
         t = pos - a
-        row.append(tuple(int(colours[a][k] * (1 - t) + colours[b][k] * t) for k in range(3)))
+        row.append(tuple(int(colors[a][k] * (1 - t) + colors[b][k] * t) for k in range(3)))
     for y in range(HEIGHT):
         # Brightest along the bottom edge, where the light bar sits below the faceplate.
         fade = ((y + 1) / HEIGHT) ** 1.6
@@ -250,40 +250,47 @@ def lift(rgb, gamma):
     return bytes(rgb).translate(table)
 
 
-def overlay_logo(rgb, path, margin=3, max_height=HEIGHT // 2):
-    """Blend a transparent logo PNG onto the bottom of a frame, trimmed and fitted."""
+def rotate(rgb):
+    """Turn a frame 180 degrees, for a faceplate mounted with its cable on the right."""
+    out = bytearray(len(rgb))
+    last = len(rgb) - 3
+    for i in range(0, len(rgb), 3):
+        out[last - i:last - i + 3] = rgb[i:i + 3]
+    return bytes(out)
+
+
+def load_logo(path, max_width=WIDTH - 6, max_height=HEIGHT // 2):
+    """A transparent logo PNG trimmed and box-averaged to fit the box.
+
+    Returns (width, height, pixels) with pixels as (x, y, coverage, color),
+    or None if it can't be read or is empty.
+    """
     size = image_size(path)
     if not size or not all(size):
-        return rgb
+        return None
     w, h = size
     # Decode at 4x the target width so trimming and box-averaging stay sharp.
-    dw = 4 * (WIDTH - 2 * margin)
+    dw = 4 * max_width
     dh = max(1, round(h * dw / w))
     if dh > 4 * HEIGHT:
         dh = 4 * HEIGHT
         dw = max(1, round(w * dh / h))
     rgba = _gst_decode(path, dw, dh, alpha=True)
     if rgba is None:
-        return rgb
+        return None
+    return fit_logo(rgba, dw, dh, max_width, max_height)
+
+
+def fit_logo(rgba, dw, dh, max_width, max_height):
     # Trim fully transparent margins (logos ship with lots of padding).
     xs = [x for x in range(dw) if any(rgba[4 * (y * dw + x) + 3] > 8 for y in range(dh))]
     ys = [y for y in range(dh) if any(rgba[4 * (y * dw + x) + 3] > 8 for x in range(dw))]
     if not xs or not ys:
-        return rgb
+        return None
     bx0, bx1, by0, by1 = xs[0], xs[-1] + 1, ys[0], ys[-1] + 1
     bw, bh = bx1 - bx0, by1 - by0
-    scale = min((WIDTH - 2 * margin) / bw, max_height / bh)
+    scale = min(max_width / bw, max_height / bh)
     lw, lh = max(1, int(bw * scale)), max(1, int(bh * scale))
-    out = bytearray(rgb)
-    ox, oy = (WIDTH - lw) // 2, HEIGHT - lh - margin
-    # Soft dark band behind the logo so the title stands out from the art.
-    fade = 6
-    for y in range(max(0, oy - fade), HEIGHT):
-        keep = 1.0 - 0.5 * min(1.0, (y - (oy - fade)) / fade)
-        row = 3 * y * WIDTH
-        for i in range(row, row + 3 * WIDTH):
-            out[i] = int(out[i] * keep)
-    # Box-average the logo down first, so its brightest colour is known.
     pixels = []
     for ty in range(lh):
         sy0, sy1 = by0 + int(ty / scale), by0 + max(int(ty / scale) + 1, int((ty + 1) / scale))
@@ -302,15 +309,50 @@ def overlay_logo(rgb, path, margin=3, max_height=HEIGHT // 2):
                     n += 1
             if a:
                 pixels.append((tx, ty, a / (255 * n), (r / a, g / a, b / a)))
+    return lw, lh, pixels
+
+
+def place_logo(rgb, logo, position="bottom", band=True, margin=3):
+    """Blend a fitted logo onto a frame at the top, bottom or center.
+
+    With band on, the art fades to half brightness behind the logo so the
+    title stands out. It covers the logo plus a short fade, running out to
+    the edge the logo sits against (both fades for a centered logo).
+    """
+    lw, lh, pixels = logo
+    out = bytearray(rgb)
+    ox = (WIDTH - lw) // 2
+    if position == "top":
+        oy = margin
+    elif position == "center":
+        oy = (HEIGHT - lh) // 2
+    else:
+        oy = HEIGHT - lh - margin
+    if band:
+        fade = 6
+        for y in range(HEIGHT):
+            below, above = y - (oy - fade), (oy + lh + fade) - y  # rows inside each fade edge
+            if position == "top":
+                into = above
+            elif position == "center":
+                into = min(below, above)
+            else:
+                into = below
+            if into <= 0:
+                continue
+            keep = 1.0 - 0.5 * min(1.0, into / fade)
+            row = 3 * y * WIDTH
+            for i in range(row, row + 3 * WIDTH):
+                out[i] = int(out[i] * keep)
     # Bright logo on dim art reads brighter than bright art, and the logo is
     # a small area, so it costs little power. Lift the logo until its brightest
     # channel is at full, at most doubling it.
     peak = max((max(c) for _, _, cov, c in pixels if cov > 0.5), default=255)
     gain = min(2.0, 255.0 / peak) if peak else 1.0
-    for tx, ty, coverage, colour in pixels:
+    for tx, ty, coverage, color in pixels:
         i = 3 * ((oy + ty) * WIDTH + ox + tx)
         for k in range(3):
-            lifted = min(255.0, colour[k] * gain)
+            lifted = min(255.0, color[k] * gain)
             out[i + k] = int(out[i + k] * (1 - coverage) + lifted * coverage)
     return bytes(out)
 
@@ -409,23 +451,34 @@ def running_appid(proc_root="/proc"):
     return best[1]
 
 
-def artwork(appid, root=STEAM_ROOT):
+def artwork(appid, root=STEAM_ROOT, style="logo_dim", position="bottom"):
     """The best 64x54 picture for a game, or None if nothing usable is cached.
 
     Side by side on five games, wide hero art with the transparent logo over
-    the bottom beat the portrait cover: centred subject, readable title. The
+    the bottom beat the portrait cover: centered subject, readable title. The
     portrait cover cropped near the top is the fallback, then the header.
+
+    style: logo_dim (art, logo, dark band behind it), logo (no band), art
+    (no logo) or logo_only (the logo big on black; art if there's no logo).
     """
     if not appid:
         return None
+    if style == "logo_only":
+        path = find_art(appid, "logo", root)
+        logo = load_logo(path, max_height=HEIGHT - 6) if path else None
+        if logo:
+            return place_logo(bytes(FRAME_BYTES), logo, position, band=False)
+        style = "logo_dim"
     hero = find_art(appid, "hero", root)
     if hero:
         frame = decode_image(hero)
         if frame:
-            frame = sharpen(frame)
-            logo = find_art(appid, "logo", root)
-            frame = lift(frame, ART_GAMMA)
-            return overlay_logo(frame, logo) if logo else frame
+            frame = lift(sharpen(frame), ART_GAMMA)
+            if style == "art":
+                return frame
+            path = find_art(appid, "logo", root)
+            logo = load_logo(path) if path else None
+            return place_logo(frame, logo, position, band=style == "logo_dim") if logo else frame
     for kind, bias in (("capsule", 0.2), ("header", 0.5)):
         path = find_art(appid, kind, root)
         if path:
@@ -444,7 +497,7 @@ STEAM_ICONS = (
 
 
 def steam_logo(size=46, paths=STEAM_ICONS):
-    """The Steam logo centred on black, or None if SteamOS's icon isn't there."""
+    """The Steam logo centered on black, or None if SteamOS's icon isn't there."""
     for path in paths:
         if not os.path.isfile(path):
             continue

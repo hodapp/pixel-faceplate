@@ -92,15 +92,15 @@ def encode(width, height, palette, frames, delay_cs=10, loop=True):
     return bytes(out)
 
 
-# A fixed 3-3-2 palette (256 colours) for test patterns and the tools.
+# A fixed 3-3-2 palette (256 colors) for test patterns and the tools.
 # Real pictures get their own palette from quantize().
 PALETTE_332 = [
     ((i >> 5) * 255 // 7, ((i >> 2) & 7) * 255 // 7, (i & 3) * 255 // 3) for i in range(256)
 ]
 
 
-def quantize(rgb, colours=256):
-    """Per-picture palette: exact when the frame has few colours, median cut otherwise.
+def quantize(rgb, colors=256):
+    """Per-picture palette: exact when the frame has few colors, median cut otherwise.
 
     The panel shows smooth 64-step ramps (seen), so a fixed cube would add
     banding the hardware doesn't have. Returns (palette, indices).
@@ -108,12 +108,12 @@ def quantize(rgb, colours=256):
     rgb = bytes(rgb)
     pixels = [rgb[i:i + 3] for i in range(0, len(rgb), 3)]
     unique = list(dict.fromkeys(pixels))
-    if len(unique) <= colours:
+    if len(unique) <= colors:
         lookup = {c: i for i, c in enumerate(unique)}
         return [tuple(c) for c in unique], bytes(lookup[p] for p in pixels)
 
     boxes = [unique]
-    while len(boxes) < colours:
+    while len(boxes) < colors:
         # Split the box with the widest channel range at its median.
         best, best_range, best_axis = None, -1, 0
         for index, box in enumerate(boxes):

@@ -13,7 +13,21 @@ import { FileSelectionType, definePlugin, openFilePicker } from "@decky/api";
 import { useEffect, useState } from "react";
 import { MdGridOn } from "react-icons/md";
 
-import { IdleChoice, Mode, Settings, SleepAction, Status, gameEvent, getStatus, saveSettings } from "./api";
+import {
+  ArtStyle,
+  GameProfile,
+  IdleChoice,
+  LogoPosition,
+  Mode,
+  SaveResult,
+  Settings,
+  SleepAction,
+  Status,
+  gameEvent,
+  getStatus,
+  saveGameSettings,
+  saveSettings,
+} from "./api";
 
 const POLL_MS = 1000;
 
@@ -37,7 +51,20 @@ const IDLE_CHOICES: { data: IdleChoice; label: string }[] = [
   { data: "keep", label: "Keep the last game's picture" },
 ];
 
-const COLOURS = [
+const ART_STYLES: { data: ArtStyle; label: string }[] = [
+  { data: "logo_dim", label: "Art + logo, shaded behind logo" },
+  { data: "logo", label: "Art + logo" },
+  { data: "art", label: "Art only" },
+  { data: "logo_only", label: "Logo only" },
+];
+
+const LOGO_POSITIONS: { data: LogoPosition; label: string }[] = [
+  { data: "top", label: "Top" },
+  { data: "center", label: "Center" },
+  { data: "bottom", label: "Bottom" },
+];
+
+const COLORS = [
   { data: "#ff8c14", label: "Amber" },
   { data: "#ffffff", label: "White" },
   { data: "#1a9fff", label: "Steam blue" },
@@ -71,8 +98,16 @@ function Content() {
   }, []);
 
   const save = async (changes: Partial<Settings>) => {
+    await apply(() => saveSettings(changes));
+  };
+
+  const saveGame = async (appid: number, changes: Partial<GameProfile> | null) => {
+    await apply(() => saveGameSettings(appid, changes));
+  };
+
+  const apply = async (call: () => Promise<SaveResult>) => {
     try {
-      const result = await saveSettings(changes);
+      const result = await call();
       setStatus(result.status);
       setError(result.ok ? "" : result.error);
     } catch (e) {
@@ -91,6 +126,11 @@ function Content() {
   }
 
   const s = status.settings;
+  const appid = status.appid;
+  const profile = appid ? s.game_profiles[String(appid)] : undefined;
+  // What the running game shows: its own choices if it has them, else the console's.
+  const art = profile ?? s;
+  const saveArt = (changes: Partial<GameProfile>) => (profile ? saveGame(appid, changes) : save(changes));
   const pickImage = async () => {
     try {
       const picked = await openFilePicker(
@@ -142,6 +182,39 @@ function Content() {
 
         {s.mode === "artwork" && (
           <>
+            {appid > 0 && (
+              <PanelSectionRow>
+                <ToggleField
+                  label={`Just for ${gameTitle(appid)}`}
+                  description={
+                    profile
+                      ? "Style and logo position below apply to this game only"
+                      : "Off: this game uses the same style as every other game"
+                  }
+                  checked={Boolean(profile)}
+                  onChange={(value) => saveGame(appid, value ? {} : null)}
+                />
+              </PanelSectionRow>
+            )}
+            <PanelSectionRow>
+              <DropdownItem
+                label="Artwork style"
+                description={art.art_style === "logo_only" ? "Games without a logo show their art instead" : undefined}
+                rgOptions={ART_STYLES}
+                selectedOption={art.art_style}
+                onChange={(option) => saveArt({ art_style: option.data as ArtStyle })}
+              />
+            </PanelSectionRow>
+            {art.art_style !== "art" && (
+              <PanelSectionRow>
+                <DropdownItem
+                  label="Logo position"
+                  rgOptions={LOGO_POSITIONS}
+                  selectedOption={art.logo_position}
+                  onChange={(option) => saveArt({ logo_position: option.data as LogoPosition })}
+                />
+              </PanelSectionRow>
+            )}
             <PanelSectionRow>
               <DropdownItem
                 label="Between games"
@@ -158,10 +231,10 @@ function Content() {
           <>
             <PanelSectionRow>
               <DropdownItem
-                label="Clock colour"
-                rgOptions={COLOURS}
-                selectedOption={s.clock_colour}
-                onChange={(option) => save({ clock_colour: option.data as string })}
+                label="Clock color"
+                rgOptions={COLORS}
+                selectedOption={s.clock_color}
+                onChange={(option) => save({ clock_color: option.data as string })}
               />
             </PanelSectionRow>
             <PanelSectionRow>
@@ -193,6 +266,19 @@ function Content() {
           </PanelSectionRow>
         )}
       </PanelSection>
+
+      {s.mode !== "off" && (
+        <PanelSection title="Mounting">
+          <PanelSectionRow>
+            <ToggleField
+              label="Upside down (cable on the right)"
+              description="Flips the picture for a faceplate mounted with its cable out the right side. The included cable won't reach; you'll need a longer one."
+              checked={s.rotate}
+              onChange={(value) => save({ rotate: value })}
+            />
+          </PanelSectionRow>
+        </PanelSection>
+      )}
 
       {s.mode !== "off" && (
         <PanelSection title="Sleep and shutdown">
@@ -242,6 +328,17 @@ function Content() {
       </PanelSection>
     </>
   );
+}
+
+function gameTitle(appid: number): string {
+  const store = (window as unknown as {
+    appStore?: { GetAppOverviewByAppID?: (id: number) => { display_name?: string } | null };
+  }).appStore;
+  try {
+    return store?.GetAppOverviewByAppID?.(appid)?.display_name || "this game";
+  } catch {
+    return "this game";
+  }
 }
 
 // Steam's launch/exit events, the same hook GabeCubeAura uses. The backend

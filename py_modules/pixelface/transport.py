@@ -1,5 +1,6 @@
 # termios serial link to the faceplate (no pyserial on SteamOS or in Decky's Python).
 
+import fcntl
 import glob
 import os
 import select
@@ -20,6 +21,10 @@ ALREADY_STORED = 0x02
 
 class LinkError(Exception):
     pass
+
+
+class LinkBusy(LinkError):
+    """Another program holds the faceplate (GabeCubeAura, or a second copy of this)."""
 
 
 def find_port():
@@ -49,6 +54,15 @@ class Link:
         if not self.port:
             raise LinkError("faceplate not found (no CH340 ttyUSB)")
         fd = os.open(self.port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        # Two writers on one port interleave packets and the panel rejects
+        # both. Anything that drives the faceplate takes an exclusive flock on
+        # the tty first (GabeCubeAura does the same). TIOCEXCL won't do: it
+        # doesn't stop root, and GabeCubeAura runs as root.
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            raise LinkBusy("faceplate in use by another app (GabeCubeAura?)")
         try:
             attrs = termios.tcgetattr(fd)
             iflag, oflag, cflag, lflag, _, _, cc = attrs

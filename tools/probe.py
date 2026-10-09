@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Poke the JSAUX PIXEL faceplate by hand: raw frames, power, brightness, solid colours, GIFs.
+# Poke the JSAUX PIXEL faceplate by hand: raw frames, power, brightness, solid colors, GIFs.
 """Usage (on the Steam Machine, from the plugin folder):
 
     python3 tools/probe.py power on|off
@@ -39,10 +39,10 @@ def solid_gif(r, g, b):
 
 
 def bars_gif():
-    colours = [(255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0),
+    colors = [(255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0),
                (255, 0, 255), (255, 0, 0), (0, 0, 255), (0, 0, 0)]
     frame = bytes((x * 8 // W) for y in range(H) for x in range(W))
-    return gif.encode(W, H, colours, [frame])
+    return gif.encode(W, H, colors, [frame])
 
 
 def main(argv):
@@ -69,7 +69,7 @@ def main(argv):
                 cap = safe_brightness(100, frame_load(bytes(rgb)))
                 if cap < 100:
                     link.write(protocol.brightness(cap))
-                    print("brightness capped at %d for this colour" % cap)
+                    print("brightness capped at %d for this color" % cap)
             elif op == "bars":
                 data = bars_gif()
             else:

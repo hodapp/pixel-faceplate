@@ -7,8 +7,8 @@ import threading
 import time
 
 from . import gif, protocol, render
-from .settings import parse_colour
-from .transport import Link, LinkError, find_port
+from .settings import for_game, parse_color
+from .transport import Link, LinkBusy, LinkError, find_port
 
 W, H = protocol.WIDTH, protocol.HEIGHT
 # The panel stores every GIF in its SPI flash, and each upload takes long
@@ -95,6 +95,7 @@ class FaceplateService:
         self.upload_ms = 0.0
         self.applied_brightness = None
         self.wanted_brightness = int(self.cfg.get("brightness", 60))
+        self.rotate = bool(self.cfg.get("rotate", False))
         # Unknown until our first upload: assume the worst (it may be showing white).
         self.shown_load = 1.0
         self.phase = "starting"
@@ -121,7 +122,10 @@ class FaceplateService:
         with self.lock:
             old = self.cfg
             self.cfg = dict(values)
-            redraw = ("mode", "image_path", "artwork_idle", "clock_colour", "clock_24h")
+            redraw = (
+                "mode", "image_path", "artwork_idle", "clock_color", "clock_24h",
+                "art_style", "logo_position", "rotate", "game_profiles",
+            )
             if any(old.get(k) != self.cfg.get(k) for k in redraw):
                 self.last_hash = None
                 self.last_aura = None
@@ -183,6 +187,10 @@ class FaceplateService:
             return False
         try:
             self.link = self._link_factory(log=lambda m: self._log("debug", m)).open()
+        except LinkBusy as error:
+            self.link = None
+            self._set("busy", "%s; turn one of them off" % error)
+            return False
         except (LinkError, OSError) as error:
             self.last_error = str(error)
             self.link = None
@@ -206,6 +214,8 @@ class FaceplateService:
         self.applied_brightness = level
 
     def _upload(self, rgb):
+        if self.rotate:
+            rgb = render.rotate(rgb)
         digest = hashlib.blake2b(rgb, digest_size=16).digest()
         if digest == self.last_hash:
             return False
@@ -240,13 +250,13 @@ class FaceplateService:
             self.image_cache[key] = render.decode_image(path, fill=fill) if path else None
         return self.image_cache[key]
 
-    def _artwork_frame(self, appid):
+    def _artwork_frame(self, appid, cfg):
         if not appid:
             return None
-        key = ("app", appid)
+        key = ("app", appid, cfg["art_style"], cfg["logo_position"])
         if key not in self.image_cache:
             self.image_cache.clear()
-            self.image_cache[key] = render.artwork(appid)
+            self.image_cache[key] = render.artwork(appid, style=cfg["art_style"], position=cfg["logo_position"])
         return self.image_cache[key]
 
     def _steam_logo(self):
@@ -255,17 +265,17 @@ class FaceplateService:
         return self.steam_logo
 
     def _clock_frame(self, cfg):
-        return render.clock(colour=parse_colour(cfg["clock_colour"]), use_24h=cfg["clock_24h"])
+        return render.clock(color=parse_color(cfg["clock_color"]), use_24h=cfg["clock_24h"])
 
     @staticmethod
     def _until_next_minute():
         return 60.5 - time.time() % 60  # wake just after the minute turns
 
-    def _aura_changed(self, colours):
-        if self.last_aura is None or len(colours) != len(self.last_aura):
+    def _aura_changed(self, colors):
+        if self.last_aura is None or len(colors) != len(self.last_aura):
             return True
         return max(
-            (abs(a - b) for old, new in zip(self.last_aura, colours) for a, b in zip(old, new)),
+            (abs(a - b) for old, new in zip(self.last_aura, colors) for a, b in zip(old, new)),
             default=0,
         ) >= AURA_THRESHOLD
 
@@ -276,11 +286,11 @@ class FaceplateService:
             self._set("running", "clock")
             return self._until_next_minute()
         if mode == "aura":
-            colours = render.read_lightbar()
-            if self._aura_changed(colours):
-                if self._upload(render.aura(colours)):
-                    self.last_aura = colours
-            self._set("running", "aura from %d light bar LEDs" % len(colours))
+            colors = render.read_lightbar()
+            if self._aura_changed(colors):
+                if self._upload(render.aura(colors)):
+                    self.last_aura = colors
+            self._set("running", "aura from %d light bar LEDs" % len(colors))
             return cfg["aura_interval"]
         if mode == "image":
             rgb = self._image_frame(cfg["image_path"], True)
@@ -294,7 +304,7 @@ class FaceplateService:
             # Steam's own launch/exit event (from the frontend) is instant; the
             # /proc check covers a client where that event never arrives.
             self.appid = self.reported_app or render.running_appid()
-            rgb = self._artwork_frame(self.appid)
+            rgb = self._artwork_frame(self.appid, for_game(cfg, self.appid))
             if rgb is None:
                 # Nothing running (or no art cached for this game).
                 idle = cfg["artwork_idle"]
@@ -330,8 +340,9 @@ class FaceplateService:
             self._set("off", "panel keeps its last picture")
             return 3600.0
         if not self._ensure_link():
-            return 2.0
+            return 10.0 if self.phase == "busy" else 2.0
         try:
+            self.rotate = cfg["rotate"]
             self.wanted_brightness = cfg["brightness"]
             self._apply_brightness(safe_brightness(self.wanted_brightness, self.shown_load))
             return self._mode_step(cfg)

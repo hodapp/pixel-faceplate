@@ -19,7 +19,7 @@ The back of the panel is a board silkscreened `DY LED-64X54-02`. That "DY" is al
 
 There's a row of pads on the bottom edge labelled V, DM, DP, G and L. With a multimeter, DM and DP go to two neighbouring MCU pins and L to the pin right next to them, so these look like the MCU's own USB plus a boot pin: a factory programming header. That pin layout doesn't match an STM32, so the MCU is probably one of the Chinese parts with a built-in USB loader. It isn't an ESP32 (esptool gets no answer, and ESP32s don't come in this package).
 
-As far as I know the FM6124 has no PWM of its own, so the MCU has to make every shade by switching LEDs on and off quickly. That may be why the vendor app snaps a lot of its graphics to 64 colours (2 bits per channel). The panel itself shows smooth 64-step ramps in red, green, blue and white (seen), so it can do better than that.
+As far as I know the FM6124 has no PWM of its own, so the MCU has to make every shade by switching LEDs on and off quickly. That may be why the vendor app snaps a lot of its graphics to 64 colors (2 bits per channel). The panel itself shows smooth 64-step ramps in red, green, blue and white (seen), so it can do better than that.
 
 ## Link
 
@@ -60,7 +60,7 @@ The panel answers with a frame of the same type and cmd. The first payload byte 
 
 Commands 03, 05, 09 and 20 are not in the vendor software; see Hidden commands.
 
-On GIF begin, status 02 means the panel already holds a GIF with that size and CRC32. It skips the upload and nothing gets written (seen: the same colour bars sent twice got 01, then 02).
+On GIF begin, status 02 means the panel already holds a GIF with that size and CRC32. It skips the upload and nothing gets written (seen: the same color bars sent twice got 01, then 02).
 
 The end command only answers with payload 01. I tried 00 and 02 and got silence both times.
 
@@ -97,7 +97,7 @@ The panel keeps the last GIF in flash. Unplug it, plug it back in, and the same 
 
 | GIF | begin accepted | chunks done | end ACK |
 |---|---|---|---|
-| 95 B (solid colour) | 10-50 ms | 20-60 ms | 120-140 ms |
+| 95 B (solid color) | 10-50 ms | 20-60 ms | 120-140 ms |
 | ~2 KB (plasma) | ~50 ms | ~105 ms | ~210 ms |
 
 The wait between the last chunk and the end ACK grows with file size at about 80 ms per 4 KB, and not with frame count:

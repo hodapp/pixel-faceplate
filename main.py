@@ -57,3 +57,14 @@ class Plugin:
             return {"ok": False, "error": "could not save: %s" % error, "status": self.service.status()}
         self.service.configure(values)
         return {"ok": True, "error": "", "status": self.service.status()}
+
+    async def save_game_settings(self, appid: int, changes: dict = None):
+        """One game's own art style/logo position; changes=None goes back to the console's."""
+        try:
+            values = self.settings.update_game(appid, changes)
+        except ValueError as error:
+            return {"ok": False, "error": str(error), "status": self.service.status()}
+        except OSError as error:
+            return {"ok": False, "error": "could not save: %s" % error, "status": self.service.status()}
+        self.service.configure(values)
+        return {"ok": True, "error": "", "status": self.service.status()}

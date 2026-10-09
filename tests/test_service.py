@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "py_modules"))
 
 from pixelface import protocol, render, service  # noqa: E402
 from pixelface.settings import DEFAULTS  # noqa: E402
-from pixelface.transport import LinkError  # noqa: E402
+from pixelface.transport import LinkBusy, LinkError  # noqa: E402
 
 
 class FakeLink:
@@ -143,7 +143,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(svc.counter.total, 1)
 
     def test_game_event_drives_artwork(self):
-        with mock.patch.object(render, "artwork", lambda appid: bytes([appid % 256]) * (64 * 54 * 3)):
+        with mock.patch.object(render, "artwork", lambda appid, **_: bytes([appid % 256]) * (64 * 54 * 3)):
             svc = make("artwork")
             svc.game_event(4358690, True)
             svc.step()
@@ -186,6 +186,34 @@ class ServiceTests(unittest.TestCase):
                 json.dump({"mode": "artwork", "artwork_idle_clock": False}, handle)
             self.assertEqual(SettingsStore(path).values["artwork_idle"], "steam")
 
+    def test_game_profile_starts_as_a_copy_and_can_be_dropped(self):
+        from pixelface.settings import SettingsStore
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SettingsStore(os.path.join(tmp, "settings.json"))
+            store.update({"art_style": "logo", "logo_position": "top"})
+            store.update_game(1931770, {})
+            self.assertEqual(store.values["game_profiles"]["1931770"], {"art_style": "logo", "logo_position": "top"})
+            store.update_game(1931770, {"art_style": "art"})
+            reloaded = SettingsStore(store.path)
+            self.assertEqual(reloaded.values["game_profiles"]["1931770"]["art_style"], "art")
+            self.assertEqual(reloaded.values["art_style"], "logo")  # the console's choice is untouched
+            with self.assertRaises(ValueError):
+                store.update_game(1931770, {"brightness": 10})  # not a per-game setting
+            store.update_game(1931770, None)
+            self.assertEqual(store.values["game_profiles"], {})
+
+    def test_british_spellings_migrate(self):
+        import json
+        from pixelface.settings import SettingsStore
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "settings.json")
+            with open(path, "w") as handle:
+                json.dump({"clock_colour": "#1a9fff", "logo_position": "centre"}, handle)
+            values = SettingsStore(path).values
+        self.assertEqual(values["clock_color"], "#1a9fff")
+        self.assertEqual(values["logo_position"], "center")
+        self.assertNotIn("clock_colour", values)
+
     def test_artwork_idle_clock_when_asked(self):
         svc = make("artwork", artwork_idle="clock")
         svc.step()
@@ -203,7 +231,118 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(svc.status()["lifetime_uploads"], 2)
 
 
+    def test_art_style_change_redraws_with_new_style(self):
+        calls = []
+
+        def fake_artwork(appid, style, position):
+            calls.append((style, position))
+            return bytes([len(calls)]) * (64 * 54 * 3)
+
+        with mock.patch.object(render, "artwork", fake_artwork):
+            svc = make("artwork")
+            svc.game_event(10, True)
+            svc.step()
+            svc.configure(dict(svc.cfg, art_style="art", logo_position="top"))
+            svc.step()
+        self.assertEqual(calls, [("logo_dim", "bottom"), ("art", "top")])
+        self.assertEqual(len(FakeLink.instances[0].gifs), 2)
+
+    def test_game_profile_overrides_only_that_game(self):
+        calls = []
+
+        def fake_artwork(appid, style, position):
+            calls.append((appid, style, position))
+            return bytes([appid]) * (64 * 54 * 3)
+
+        profiles = {"10": {"art_style": "art", "logo_position": "top"}}
+        with mock.patch.object(render, "artwork", fake_artwork):
+            svc = make("artwork", game_profiles=profiles)
+            svc.game_event(10, True)
+            svc.step()
+            svc.game_event(10, False)
+            svc.game_event(20, True)
+            svc.step()
+        self.assertEqual(calls, [(10, "art", "top"), (20, "logo_dim", "bottom")])
+
+    def test_rotate_flips_what_is_sent_and_redraws(self):
+        sent = []
+        with mock.patch.object(service, "encode_frame", lambda rgb: sent.append(rgb) or rgb):
+            svc = make("clock")
+            svc.step()
+            svc.configure(dict(svc.cfg, rotate=True))
+            svc.step()
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(sent[1], render.rotate(sent[0]))
+
+    def test_busy_port_waits_without_an_error(self):
+        class BusyLink(FakeLink):
+            def open(self):
+                raise LinkBusy("faceplate in use by another app (GabeCubeAura?)")
+
+        svc = service.FaceplateService(dict(DEFAULTS, mode="clock"), link_factory=BusyLink)
+        self.assertEqual(svc.step(), 10.0)
+        self.assertEqual(svc.phase, "busy")
+        self.assertEqual(svc.last_error, "")
+        self.assertIsNone(svc.link)
+
+
 class RenderTests(unittest.TestCase):
+    def test_rotate_is_180_degrees(self):
+        frame = bytearray(64 * 54 * 3)
+        frame[0:3] = b"\x01\x02\x03"  # top left
+        turned = render.rotate(bytes(frame))
+        self.assertEqual(turned[-3:], b"\x01\x02\x03")  # bottom right
+        self.assertEqual(render.rotate(turned), bytes(frame))
+
+    def _logo(self, w=10, h=4):
+        # Solid white w x h logo, already fitted.
+        return w, h, [(x, y, 1.0, (255.0, 255.0, 255.0)) for y in range(h) for x in range(w)]
+
+    def _row_level(self, frame, y):
+        return frame[3 * 64 * y]  # left edge, outside the logo
+
+    def test_logo_band_dims_only_the_logo_side(self):
+        art = bytes([200]) * (64 * 54 * 3)
+        bottom = render.place_logo(art, self._logo(), "bottom", band=True)
+        self.assertEqual(self._row_level(bottom, 0), 200)
+        self.assertEqual(self._row_level(bottom, 53), 100)
+        top = render.place_logo(art, self._logo(), "top", band=True)
+        self.assertEqual(self._row_level(top, 0), 100)
+        self.assertEqual(self._row_level(top, 53), 200)
+
+    def test_centered_logo_band_fades_both_ways(self):
+        art = bytes([200]) * (64 * 54 * 3)
+        out = render.place_logo(art, self._logo(), "center", band=True)
+        self.assertEqual(self._row_level(out, 0), 200)
+        self.assertEqual(self._row_level(out, 53), 200)
+        self.assertEqual(self._row_level(out, 27), 100)
+
+    def test_logo_without_band_leaves_art_alone(self):
+        art = bytes([200]) * (64 * 54 * 3)
+        out = render.place_logo(art, self._logo(), "bottom", band=False)
+        self.assertEqual(self._row_level(out, 53), 200)
+        # The logo itself lands centered, 3 px up from the bottom.
+        x, y = (64 - 10) // 2, 54 - 4 - 3
+        self.assertEqual(out[3 * (y * 64 + x)], 255)
+
+    def test_fit_logo_trims_padding(self):
+        # 8x8 RGBA, one opaque red 2x2 block in the middle.
+        rgba = bytearray(8 * 8 * 4)
+        for y in (3, 4):
+            for x in (3, 4):
+                rgba[4 * (y * 8 + x):4 * (y * 8 + x) + 4] = b"\xff\x00\x00\xff"
+        w, h, pixels = render.fit_logo(bytes(rgba), 8, 8, 20, 10)
+        self.assertEqual((w, h), (10, 10))
+        self.assertTrue(all(c == (255.0, 0.0, 0.0) for _, _, _, c in pixels))
+
+    def test_logo_only_falls_back_to_art_without_a_logo(self):
+        art = bytes([50]) * (64 * 54 * 3)
+        with mock.patch.object(render, "find_art", lambda appid, kind, root: "/hero.jpg" if kind == "hero" else None), \
+                mock.patch.object(render, "decode_image", lambda path, **_: art), \
+                mock.patch.object(render, "sharpen", lambda rgb: rgb):
+            out = render.artwork(10, style="logo_only")
+        self.assertEqual(out, render.lift(art, render.ART_GAMMA))
+
     def test_clock_frame_size(self):
         self.assertEqual(len(render.clock(0)), 64 * 54 * 3)
 

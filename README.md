@@ -88,11 +88,23 @@ Quick Access menu > Decky > gear > Plugins, find Pixel Faceplate, and uninstall 
 - Off: Leaves the panel alone and lets go of the serial port. The panel keeps showing whatever it last stored.
 - Game artwork: When you launch a game, the panel shows the game's wide hero art with its logo over the bottom. The logo is pushed to full brightness over a slightly darker band, and the art's midtones are lifted, because even at maximum the panel is much dimmer than the Steam Machine's light bar. It finds the running game and its art the same way [GabeCubeAura](#thanks-gabecubeaura) does, so your SteamGridDB custom art is used if you have it. Between games it shows the Steam logo (drawn from the icon SteamOS already has), the clock, or the last game's picture, whichever you pick.
 
+  Artwork style picks how the game is drawn:
+  - Art + logo, shaded behind logo: the art darkens toward the logo so the title reads on busy art. This is the default.
+  - Art + logo: the same without the shading. Better when the art is already dark at that end, or the shading eats too much of the picture.
+  - Art only: no logo.
+  - Logo only: the logo as big as it fits, on black. Games without a logo show their art instead.
+
+  The logo can go at the top, center or bottom, in any style that shows it. The shading follows it.
+
+  Style and logo position apply to every game unless you say otherwise. While a game is running, turn on "Just for" that game and the two settings below it change for that game only. It starts from your usual choices, so nothing changes until you pick something. Turn it off and the game goes back to your usual style. Everything else (brightness, upside down, sleep) is for the whole console.
+
   ![The Steam logo on the faceplate between games, with GabeCubeAura's controller battery meter on the light bar](docs/idle-steam-logo.jpg)
 
-- Clock: Large digits in a colour of your choice, 12 or 24 hour. Redrawn once a minute.
-- Light bar aura: Copies the Steam Machine's light bar colours onto the panel as a glow, so it follows GabeCubeAura or Steam's own LED effects. It checks once a minute by default and ignores small changes.
+- Clock: Large digits in a color of your choice, 12 or 24 hour. Redrawn once a minute.
+- Light bar aura: Copies the Steam Machine's light bar colors onto the panel as a glow, so it follows GabeCubeAura or Steam's own LED effects. It checks once a minute by default and ignores small changes.
 - Custom image: Any PNG, JPG, GIF or BMP on the Steam Machine, cropped to fit.
+
+If your faceplate is mounted upside down so the cable comes out the right side, turn on Upside down and everything is flipped to match. The included cable won't reach from that side, so you'll need a longer one.
 
 There's also a brightness slider, and a counter showing how many pictures have been written to the panel's flash, this session and in total.
 
@@ -128,6 +140,7 @@ I measured the limit on USB-A with solid white: brightness 40, 50 and 60 each he
 
 - If the panel says "Faceplate not found", check the cable and make sure nothing else has the serial port open (the JSAUX daemon, for example). The panel shows up as a CH340 serial device, `1a86:7523`.
 - If the panel keeps restarting, flashing or showing glitchy lines, it's probably starting up into a picture that's too bright for the port. Copy this repo's `tools` and `py_modules` folders to the Steam Machine, run `python3 tools/rescue.py` from that folder, then plug the panel into the USB-C port. The script turns the screen off the moment the panel appears, stores a black picture and turns the screen back on. After that it's safe to go back to USB-A.
+- If the status says the faceplate is in use by another app, something else is driving it, usually GabeCubeAura's faceplate support. Only one can have it at a time; turn one of them off and the other picks it up within a few seconds.
 - The plugin logs to Decky's log: `journalctl -u plugin_loader | grep "Pixel Faceplate"`
 
 ## How it works
@@ -151,7 +164,7 @@ pnpm package      # out/Pixel-Faceplate-v<version>.zip
 
 ## Thanks, GabeCubeAura
 
-This plugin exists as quickly as it does because of [GabeCubeAura](https://github.com/Alyenax/GabeCubeAura) by Alyenax. If you have a Steam Machine and haven't tried it, go install it: it drives the light bar with game artwork colours, launch animations, performance meters, screen sync and weather, and it's very well made.
+This plugin exists as quickly as it does because of [GabeCubeAura](https://github.com/Alyenax/GabeCubeAura) by Alyenax. If you have a Steam Machine and haven't tried it, go install it: it drives the light bar with game artwork colors, launch animations, performance meters, screen sync and weather, and it's very well made.
 
 Reading its source taught me most of what I needed to know about building a Decky plugin for the Steam Machine: how to structure the backend, how to tell which game is running (Steam's launch and exit events, with a fallback), and where Steam keeps game artwork, including SteamGridDB custom art and the newer cache layout. Pixel Faceplate's code is new, but on those points it follows GabeCubeAura's approach, and the two plugins pick the same artwork for the same game. GabeCubeAura is BSD-3-Clause licensed. Thank you, Alyenax.
 

@@ -21,7 +21,7 @@ class GifRoundTrip(unittest.TestCase):
     W, H = 64, 54
 
     def decode(self, data, count):
-        # Pillow hands back later animation frames as RGB, so compare colours.
+        # Pillow hands back later animation frames as RGB, so compare colors.
         image = Image.open(io.BytesIO(data))
         frames = []
         for index in range(count):
@@ -60,13 +60,13 @@ class GifRoundTrip(unittest.TestCase):
 
 
 class Quantize(unittest.TestCase):
-    def test_few_colours_are_exact(self):
+    def test_few_colors_are_exact(self):
         rgb = bytes([255, 0, 0, 0, 0, 255] * 1728)
         palette, indices = gif.quantize(rgb)
         self.assertEqual(sorted(palette), [(0, 0, 255), (255, 0, 0)])
         self.assertEqual(b"".join(bytes(palette[i]) for i in indices), rgb)
 
-    def test_many_colours_stay_close(self):
+    def test_many_colors_stay_close(self):
         rng = random.Random(3)
         rgb = bytes(rng.randrange(256) for _ in range(64 * 54 * 3))
         palette, indices = gif.quantize(rgb)

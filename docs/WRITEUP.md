@@ -33,7 +33,7 @@ The useful part was the serial code. The Python plugin has an old code path that
 
 On the Steam Machine the faceplate shows up as a QinHeng CH340 USB serial adapter (`1a86:7523`) at `/dev/ttyUSB0`. SteamOS gives the logged-in user access to it, so no udev rules or root are needed. The baud rate is 1,000,000.
 
-SteamOS has no pyserial, so I opened the port with Python's `termios` directly and wrote a small GIF encoder, since there's no Pillow either. The first upload, a solid red picture, worked: the panel answered every chunk and turned red. Colour bars and a smooth gradient test followed. The panel shows smooth 64-step ramps in red, green, blue and white, so its colour depth is better than I expected.
+SteamOS has no pyserial, so I opened the port with Python's `termios` directly and wrote a small GIF encoder, since there's no Pillow either. The first upload, a solid red picture, worked: the panel answered every chunk and turned red. Color bars and a smooth gradient test followed. The panel shows smooth 64-step ramps in red, green, blue and white, so its color depth is better than I expected.
 
 A few things only showed up by trying them:
 
@@ -69,7 +69,7 @@ So I took the back off.
 
 It's an LED matrix behind a diffuser, not an LCD. The board is silkscreened `DY LED-64X54-02`, and it looks like a shrunken HUB75 LED wall panel:
 
-- 24 FM6124EJ constant-current LED drivers. 24 times 16 channels is 384, which is 64 columns times three colours times two, so I'd guess it drives a top and bottom half of 27 rows each.
+- 24 FM6124EJ constant-current LED drivers. 24 times 16 channels is 384, which is 64 columns times three colors times two, so I'd guess it drives a top and bottom half of 27 rows each.
 - FM TC6960C row drivers.
 - Two 74HC245 buffers between the microcontroller and the drivers.
 
@@ -106,7 +106,7 @@ I stopped at 0x20 on purpose. Firmware update commands, if there are any, tend t
 
 With the protocol known, the plugin itself was the easy part, and most of the credit for that goes to [GabeCubeAura](https://github.com/Alyenax/GabeCubeAura) by Alyenax. It's the Decky plugin that drives the Steam Machine's light bar, and it's well built. I read its source closely and used it as my baseline: how the backend is structured, how to tell which game is running, and where Steam keeps artwork. Without it this would have taken much longer. My plugin runs as the normal deck user, uses only Python's standard library and GStreamer (both already on SteamOS), and talks to the panel directly.
 
-The default mode shows the running game's artwork. Getting that to look good on 3,456 pixels took some trying. I rendered six layouts for five games and compared them side by side at the panel's real size. Steam's wide "hero" background, cropped to the panel's shape, with the game's transparent logo laid over the bottom, beat everything else. The portrait cover kept cutting through faces and titles. A light sharpen helps a lot at this size, and so does picking a fresh 256-colour palette for every picture.
+The default mode shows the running game's artwork. Getting that to look good on 3,456 pixels took some trying. I rendered six layouts for five games and compared them side by side at the panel's real size. Steam's wide "hero" background, cropped to the panel's shape, with the game's transparent logo laid over the bottom, beat everything else. The portrait cover kept cutting through faces and titles. A light sharpen helps a lot at this size, and so does picking a fresh 256-color palette for every picture.
 
 Things that broke on the way:
 
@@ -114,7 +114,7 @@ Things that broke on the way:
 - My first version asked Steam's UI which game was running and got nothing back. It also didn't know that newer Steam versions keep artwork in hash-named subfolders. Graveyard Keeper 2 was the game that exposed both. I switched to the way [GabeCubeAura](https://github.com/Alyenax/GabeCubeAura) does it: Steam's own launch and exit events, a check for Steam's game process as a backup, and an artwork lookup that tries your SteamGridDB custom art first and then every layout of Steam's cache.
 - Even at full brightness the panel is much dimmer than the Steam Machine's light bar. Brightness above 100 made no visible difference, so 100 seems to be the real maximum. I tried darkening the art so a bright logo would stand out, and that didn't help. What worked was lifting the art's midtones and pushing the logo to full brightness.
 
-There's also a clock, a mode that copies the light bar's colours onto the panel as a glow, and a custom image mode. When no game is running it shows the Steam logo, drawn from the icon SteamOS already ships, which looks great at this resolution. In this shot GabeCubeAura is showing my controller's battery level on the light bar underneath:
+There's also a clock, a mode that copies the light bar's colors onto the panel as a glow, and a custom image mode. When no game is running it shows the Steam logo, drawn from the icon SteamOS already ships, which looks great at this resolution. In this shot GabeCubeAura is showing my controller's battery level on the light bar underneath:
 
 ![The Steam logo on the faceplate while the Steam Machine idles](idle-steam-logo.jpg)
 
