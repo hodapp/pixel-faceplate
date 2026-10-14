@@ -130,6 +130,8 @@ The panel stores whatever you send it and shows it again after a power cut. That
 
 The chip on the board is a 25Q016B, an ordinary 2 MB SPI flash. Chips like that are typically rated for around 100,000 erases per 4 KB sector. Whether that budget matters depends on how the firmware spreads its writes, and there's no way to see that from outside.
 
+JSAUX has said that still images don't write flash and that only GIFs over 20 KB do. I tested that by cutting the panel's power after uploads from 1 KB to 30 KB, still and animated. Every one of them came back when the power did, so every upload is a flash write, whatever its size. The numbers are in [PROTOCOL.md](PROTOCOL.md).
+
 So the plugin is careful with writes:
 
 - It only sends a picture when it's different from the last one, never more than once a second.

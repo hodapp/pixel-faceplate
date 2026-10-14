@@ -150,7 +150,7 @@ Month and day are **zero-based** (September = 8, the 1st = 0); hour/minute/secon
 ## 6. What the panel does *not* have
 
 - **No raw-pixel command** and **no way to show an image without storing it.** Every command 0x00–0xEF and both frame types have been probed; 0x03 was the last candidate and it displays nothing. The only way to show a picture is a GIF upload, which is a flash write.
-- **No host-visible "small change" path:** the vendor app itself re-encodes and re-uploads a whole GIF for every clock tick / dashboard update (~1/s), with no change detection. There is **no "GIFs over 20 KB use flash" threshold** anywhere in the vendor code; the firmware clock (§4.2) is the only zero-write way to keep time.
+- **No host-visible "small change" path:** the vendor app itself re-encodes and re-uploads a whole GIF for every clock tick / dashboard update (~1/s), with no change detection. There is **no "GIFs over 20 KB use flash" threshold** anywhere in the vendor code, and none on the panel either: GIFs from 1 KB up, still or animated, all survive a power cut (§8). The firmware clock (§4.2) is the only zero-write way to keep time.
 - **No reachable bootloader** on the V/DM/DP/G/L header (§7).
 
 ## 7. Hardware
@@ -200,6 +200,26 @@ The FM6124 has no PWM, so the MCU makes shades by switching LEDs quickly; the ve
 | 1 noisy frame | 5,501 | 2 | 216 ms |
 | 12 noisy frames | 57,813 | 15 | 1,238 ms |
 
+### Is there a size below which nothing is stored? (seen)
+
+JSAUX stated publicly (2026-10-10) that static images and the app's built-in displays don't write flash, and that only GIFs over 20 KB do. Tested with `tools/flashtest.py`: each GIF was uploaded, left up for 3 s, then the panel's USB power was cut for 5 s at the hub (`uhubctl`; the panel went fully dark). After power-up the screen was photographed and the same GIF's begin frame was sent again. Each GIF had a fresh CRC32, so a 02 ("already stored") reply can only come from what the panel kept through the power cut.
+
+| GIF | frames | bytes | end ACK | after the power cut |
+|---|---|---|---|---|
+| still | 1 | 1,001 | 150 ms | same picture, begin → 02 |
+| still | 1 | 5,000 | 211 ms | same picture, begin → 02 |
+| animated | 3 | 5,001 | 212 ms | same picture, begin → 02 |
+| animated | 5 | 10,000 | 305 ms | same picture, begin → 02 |
+| animated | 7 | 15,000 | 400 ms | same picture, begin → 02 |
+| animated | 9 | 19,000 | 499 ms | same picture, begin → 02 |
+| animated | 10 | 21,000 | 551 ms | same picture, begin → 02 |
+| animated | 14 | 30,001 | 705 ms | same picture, begin → 02 |
+
+- Every GIF survived the power cut. The end ACK grows steadily at ≈19 ms/KB (the same ≈80 ms per 4 KB as above), with no step at 20 KB. A still and an animated GIF of the same size take the same time.
+- The board has no battery: the firmware clock (§4.2) loses its date on the same power cut. A GIF that survives was written to non-volatile memory.
+- **Verdict: every GIF upload is a flash write**, from 1 KB up, still or animated. The firmware's own modes (`05` clock, `09`, `21 00–03`) show without an upload and leave the stored GIF in place, but the clock, dashboard and timer screens in JSAUX's app are GIFs re-uploaded about once a second (§6), and each distinct one is stored.
+- Not yet known: where on the 25Q016B each upload lands, i.e. whether the firmware rotates sectors. That needs a flash dump before and after an upload.
+
 ---
 
 ## Appendix A — How this was worked out
@@ -222,3 +242,4 @@ In `tools/` (this repo):
 - `bootprobe.py PORT {link,watch,testoff,stm,wch,listen,send}` — link check, bootloader probes, `F0 00`, and a `send` limited to the safe commands (21/F0/05/09).
 - `lab.py` / `lab_serve.py` — bench probing (every frame logged). 0x03 is gated behind `PROBE_03`; the `PAST_GUARD` token lifts the above-0x21 guard for empty-payload sweeps. Use only deliberately.
 - `lab_camfuzz.py` — sends a frame plan and flags any that change the screen, using a camera.
+- `flashtest.py HUB PORT CAMERA_URL OUTDIR` — the power-cut test in §8: uploads GIFs of set sizes, cuts USB power with `uhubctl`, photographs the panel and re-sends each begin. Every case is one flash write.
