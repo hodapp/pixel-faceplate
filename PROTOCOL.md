@@ -1,164 +1,196 @@
-# JSAUX Pixel Matrix Faceplate serial protocol
+# JSAUX Pixel Matrix Faceplate — serial protocol
 
-Worked out from JSAUX's own software for it (the JSAUX PIXEL V1.0 beta package built 2026-09-18) and then checked against a real panel. Anything marked "seen" I watched happen on hardware. The rest comes from the vendor code and hasn't been tested.
+A reference for talking to the JSAUX PIXEL faceplate (a 64×54 RGB LED matrix) over its USB-serial link. Worked out from JSAUX's own software (the PIXEL V1.0 beta package, built 2026-09-18) and then checked against a real panel.
 
-## Board
+Throughout, **(seen)** marks behaviour observed on hardware; everything else is read from the vendor code and not yet tested. "The vendor app/daemon" means JSAUX's own software.
 
-The back of the panel is a board silkscreened `DY LED-64X54-02`. That "DY" is also the magic at the start of every serial frame. It's an LED matrix behind a white diffuser sheet and a smoked clear front, and it looks like a shrunken HUB75 wall panel with the controller on the back. The diffuser sheet lifts out. Without it the pixels are sharper and brighter straight on, but much worse from off to the side, and the smoked front still covers the LEDs.
+---
 
-| part | marking | job |
-|---|---|---|
-| U1 to U30 (24 of them) | FM 6124EJ | 16-channel constant-current column drivers. 24 x 16 = 384 = 64 columns x RGB x 2 halves, so it probably scans a top and bottom half of 27 rows each |
-| U21, U31 and two more on the left edge | FM TC6960C | row scan drivers |
-| U10, U20 | 74HC245 | buffers between the MCU and the driver chain |
-| U11 | none, the top is blank | the MCU: LQFP-48 with a 24 MHz crystal |
-| U22 | 25Q016B | 16 Mbit (2 MB) SPI NOR flash in a SOIC-8, most likely where uploads end up (the MCU has its own flash too, so not proven) |
-| U36 | WCH CH340N | the USB serial bridge |
-| U33 | V05 | USB ESD protection, probably |
-| the 7533 part | HT7533 | 3.3 V regulator |
+## 1. Link
 
-There's a row of pads on the bottom edge labeled V, DM, DP, G and L, about 2 mm apart. With a multimeter, DM and DP go to two neighboring MCU pins and L to the pin right next to them, so these look like the MCU's own USB plus a strap pin: a factory header. That pin layout doesn't match an STM32. It isn't an ESP32 either (esptool gets no answer, and ESP32s don't come in this package).
+- USB-serial bridge: QinHeng **CH340**, VID:PID `1a86:7523`, no serial number. On Linux the `ch341` driver binds it as `/dev/ttyUSBn`; on macOS it enumerates as `/dev/cu.usbserial-*`.
+- **1,000,000 baud, 8N1, no flow control.** DTR/RTS may stay asserted; opening the port resets nothing (seen).
 
-What the pads do (seen, with the panel running):
+## 2. Frame format
 
-| pad | voltage to ground | what it is |
-|---|---|---|
-| V | 5.05 V | USB 5 V in |
-| DM | 0.11 V | MCU USB D-, idle |
-| DP | 0 V | MCU USB D+, idle. Nothing pulls it up, so the MCU's own USB is off in normal use |
-| G | 0 V | ground |
-| L | 3.3 V | factory test strap, see below |
-
-- L to G while running: nothing. The panel kept answering commands five times a second throughout, so L isn't reset.
-- L to G at power-up: the panel starts the factory test pattern (see Factory test mode).
-- A USB cable on DM, DP and G: no USB device shows up, either on a normal start or with L held to G at power-up.
-- Bootloader over the CH340: no answer at 115200 baud to the STM32-style 0x7F sync (8E1) or to WCH's identify frame, with or without L held at power-up, and nothing sent unprompted.
-
-So whatever starts this MCU's bootloader, if it still has one, isn't on any pad you can reach without a soldering iron. There are also two small unlabeled round pads below the MCU, next to C14. Two bare pads beside an MCU are often its debug port, but I haven't measured them.
-
-As far as I know the FM6124 has no PWM of its own, so the MCU has to make every shade by switching LEDs on and off quickly. That may be why the vendor app snaps a lot of its graphics to 64 colors (2 bits per channel). The panel itself shows smooth 64-step ramps in red, green, blue and white (seen), so it can do better than that.
-
-## Link
-
-- USB-serial bridge: QinHeng CH340, VID:PID `1a86:7523`, no serial number. Linux binds `ch341` and you get `/dev/ttyUSBn`.
-- 1,000,000 baud, 8N1, no flow control. DTR and RTS can stay asserted; opening the port doesn't reset anything (seen).
-
-## Frames
-
-Both directions use the same shape:
+Both directions use the same framing:
 
 ```
 44 59 | type | cmd | len_hi len_lo | payload (len bytes) | crc_hi crc_lo
 ```
 
-`44 59` is ASCII "DY". The CRC is CRC-16/KERMIT (poly 0x8408 reflected, init 0, no final xor) over every byte before it, magic included, sent big-endian. Here's a frame the vendor plugin hard-codes, which checks out:
+- `44 59` is ASCII **"DY"** (also the board's silkscreen prefix).
+- `type` and `cmd` are one byte each. `len` is a big-endian u16 payload length.
+- **CRC is CRC-16/KERMIT** (poly `0x8408` reflected, init 0, no final XOR) over every byte before it, the `DY` magic included, sent big-endian.
+
+Example frame (hard-coded by the vendor plugin, CRC verified):
 
 ```
 44 59 01 04 00 08 00 00 04 A4 6C EA A0 64 2C F6
+└─DY─┘ ty cmd └len=8┘ └──────payload──────┘ └crc┘
 ```
 
-The panel answers with a frame of the same type and cmd. The first payload byte is a status, and 0x01 means OK (seen). On GIF begin, 0x02 means the panel already has that picture (see below). The vendor daemon retries on 0x02 as if the panel were busy.
+The panel replies with a frame of the **same type and cmd**. The first payload byte of a reply is a **status**:
 
-## Commands
+| status | meaning |
+|---|---|
+| `00` | rejected / not accepted |
+| `01` | OK (for GIF/0x03 begin: ready to receive) |
+| `02` | GIF begin: already stored, skip upload · 0x03 begin: a download session is already open |
 
-| type | cmd | payload | what | reply |
+Only frame **types `01` (control) and `02` (data)** exist. Every other type is silent (seen).
+
+## 3. Command reference
+
+All commands are type `01` unless noted. Payloads are exact byte layouts.
+
+| type | cmd | payload | purpose | reply |
 |---|---|---|---|---|
-| 01 | 01 | 1 byte, 0/1 | screen power | yes, echo (seen) |
-| 01 | 02 | 1 byte, 0-100 | brightness | none, ever (seen) |
-| 01 | 03 | 7-8 bytes, not decoded | **danger:** seems to start a download, probably firmware update; see below | 00, or 02 when it starts a download (seen) |
-| 01 | 04 | u32 size, u32 crc32 (BE) | GIF upload begin | 01, or 02 if already stored (seen) |
-| 01 | 05 | none | switch to the built-in clock (seen) | 01 |
-| 01 | 09 | none | switch to the built-in rainbow pyramid animation (seen) | 01 |
-| 01 | 0B | 01 | GIF upload end, show it | 01 after ~80 ms per 4 KB (seen) |
-| 01 | 20 | ? | unknown, wants arguments | 00 to everything tried (seen) |
-| 01 | 21 | 1 byte, 00-03 | built-in animation, see below (seen) | 01, or 00 for values above 03 (seen) |
-| 01 | F0 | 1 byte | factory test pattern, see Factory test mode (seen) | none (seen) |
-| 02 | 02 | u16 seq + up to 498 bytes | GIF data chunk | 01 per chunk (seen) |
+| 01 | 01 | `1` byte, 0/1 | screen power off/on | echo (seen) |
+| 01 | 02 | `1` byte, 0–100 | brightness | none, ever (seen) |
+| 01 | 03 | header ≥6 bytes | **download/transfer channel — see §5. Not a display command. Handle with care.** | `00`/`01`/`02` (seen) |
+| 01 | 04 | `u32 size`, `u32 crc32` (BE) | GIF upload: begin | `01`, or `02` if already stored (seen) |
+| 02 | 02 | `u16 seq` (BE) + ≤498 data bytes | GIF upload: data chunk | `01` per chunk (seen) |
+| 01 | 0B | `01` | GIF upload: end & show | `01` after ≈80 ms per 4 KB (seen) |
+| 01 | 05 | none, or 7 bytes (see §4.2) | built-in clock; with payload, also sets the time | `01` (seen) |
+| 01 | 09 | none | built-in rainbow-pyramid animation | `01` (seen) |
+| 01 | 20 | `condition`, `temperature` | built-in weather screen (see §4.3) | `01`, or `00` if a field is out of range (seen) |
+| 01 | 21 | `1` byte, 00–03 | built-in animation (see §4.4) | `01`, or `00` above 03 (seen) |
+| 01 | 22 | none (1 ignored byte accepted) | return to power-up screen (rainbow pyramid) | `01` (seen) |
+| 01 | F0 | `1` byte | factory test patterns (see §4.5) | none (seen) |
 
-Commands 03, 05, 09 and 20 are not in the vendor software; see Hidden commands.
+Commands `03`, `05`, `09`, `20`, `22` are **not used by the vendor app** — they were found by probing the firmware directly. The vendor app draws its own clock/weather/dashboard as GIFs and uploads them.
 
-On GIF begin, status 02 means the panel already holds a GIF with that size and CRC32. It skips the upload and nothing gets written (seen: the same color bars sent twice got 01, then 02).
+## 4. Display commands
 
-The end command only answers with payload 01. I tried 00 and 02 and got silence both times.
+### 4.1 GIF upload (01 04 → 02 02 → 01 0B)
 
-The vendor daemon sends `F0 00` and waits 20 ms before each upload. It waits 36 ms after a 02 reply and 12 ms between chunks, and allows up to 3 tries with a 1 s timeout per frame.
+The only way to put an arbitrary picture on the panel. Pictures are **GIF89a, 64×54, global palette** (animated GIFs allowed). There is no raw-pixel command anywhere (see §6).
 
-## Hidden commands
+1. **Begin** `01 04` with `[u32 size BE][u32 crc32 BE]` (zlib CRC32 of the GIF). Reply `01` = send it; `02` = the panel already holds that exact size+crc32, upload is skipped and nothing is written.
+2. **Chunks** `02 02` with `[u16 seq BE]` + up to **498** data bytes, `seq` counting from 0. Each replies `01`.
+3. **End** `01 0B 01`. Replies `01` once the write completes. (End only accepts payload `01`; `00`/`02` draw silence.)
 
-None of these appear in the vendor software. I found them by sending each unused command number in 0x00-0x20 once, with an empty payload, and checking that screen power still answered after each one. 0x00, 0x06-0x08, 0x0A and 0x0C-0x1F stayed silent. I didn't probe above 0x21 because firmware-update commands, if there are any, tend to live up there, and an empty "start update" could wipe the program. None of the pads on the board gets you into a bootloader (see Board), so a wiped panel would need soldering to the MCU and firmware nobody has published.
+There is **one GIF slot**: after storing B, A's begin frame returns `01` again and needs a full re-upload. A stored GIF survives a power cut and is re-shown on boot. Re-showing the stored GIF without re-uploading: send its begin (gets `02`), then `0B 01`.
 
-- 0x05 switches the panel to a clock drawn by the firmware itself. Its real-time clock has never been set, so mine read `4989.01.01 00:00` and then counted up from there.
-- 0x09 switches to a built-in rainbow pyramid animation.
-- Both are display modes. They survive a power cut, and they leave the stored GIF alone: sending the same GIF's begin frame afterwards still gets 02. Uploading a new GIF switches back to showing it.
-- I couldn't find how to set that clock. 0x20 answers 00 to empty payloads and to the usual date layouts (u16 year + month/day/h/m/s, 2-digit year, Unix seconds).
-- 0x03 is not the clock, and you shouldn't poke it. While trying date layouts on it, two payloads, `ea 07 00 00 00 00 00` and `07 ea 00 00 05 00 00 00`, got status 02 instead of 00. Some time later the panel blinked a white document icon with a red down arrow and a red X, then went back to its animation. That looks like "download failed": the panel took the bytes as the start of a download, waited for data that never came, and gave up. My guess is that 03 starts a firmware update over the normal USB connection. No data followed, nothing was written, and the panel kept answering normally. But sending the wrong thing after a 02 could overwrite the firmware, and there's no way to recover it (see Board). Once, on an earlier day, the clock's month changed from 01 to 03 after a batch of 0x03 attempts. It may have been a side effect of the same thing.
+The vendor daemon sends `F0 00` and waits 20 ms before each upload, waits 36 ms after an `02`, 12 ms between chunks, and allows 3 tries at a 1 s timeout per frame.
 
-There's still no command for raw pixels or for showing something without storing it.
+### 4.2 Clock (01 05)
 
-## Built-in animations (seen)
+`01 05` with no payload switches to a clock the firmware draws itself. With a 7-byte payload it also **sets the time**:
 
-`21` is in JSAUX's protocol code, but their app never sends it to the panel. Its "modes" 01-09 (dashboard, clock, countdown and so on) are screens their own software draws, and it intercepts `21` before it reaches the serial port. The firmware has four animations of its own:
+```
+[u16 year BE][month-1][day-1][hour][minute][second]
+   07 EA        09       0C     10     37     0A      → 2026-10-13 16:55:10
+```
 
-| `21` value | animation |
+Month and day are **zero-based** (September = 8, the 1st = 0); hour/minute/second are plain binary. There is no weekday field. The display is 24-hour, blue, with a blinking colon. Always send all 7 bytes: a 1–4 byte payload is accepted but fills the remaining fields from stale buffer contents, giving a garbage date. Bytes past the 7th are ignored.
+
+**The time is RAM-only** — it is not saved. After a power cut the clock resets (to `4989.01.01 00:00` on the test unit) and the panel comes back on its power-up screen, so the time must be re-sent on every power-up. Setting it writes nothing to flash.
+
+### 4.3 Weather (01 20)
+
+`01 20` with `[condition][temperature]` shows a firmware-drawn weather screen (labels in Chinese):
+
+| condition | |
 |---|---|
-| 00 | rainbow triangle (the same one as command 09) |
-| 01 | a spinning, morphing d20 |
-| 02 | a blue sunburst |
-| 03 | a car driving through the desert |
+| 0 | 晴天 sunny (red) |
+| 1 | 多云 cloudy |
+| 2 | 下雨 rain |
+| 3 | 下雪 snow (blue) |
 
-Values 04 and up (I tried 04, 05, 08, 0A, 10 and FF) answer 00 and change nothing. Like 05 and 09, these are saved display modes: they survive a power cut and leave the stored GIF alone.
+`temperature` is **sign-magnitude**: bit 7 = minus, low 7 bits = 0–99 °C (`8A` → −10 °C). Out-of-range values reply `00`. Extra trailing bytes are ignored.
 
-## Factory test mode (seen)
+### 4.4 Built-in animations (01 21) and friends
 
-Holding the L pad to G while the panel powers up starts a test pattern: full red, green, blue and white in turn, then scanning lines, over and over. The firmware keeps answering commands while it runs.
+`01 21` with one byte selects a firmware animation:
 
-The panel saves this mode. Unplugging it and plugging it back in without touching L brings the test pattern straight back, the same way the 05 clock and 09 rainbow modes survive a power cut.
-
-`F0 00` turns it off. The panel sends no reply, stops the test pattern and goes back to whatever display mode it had before (on mine, the 09 rainbow pyramid). This is the command JSAUX's daemon sends before every upload. `tools/bootprobe.py PORT testoff` sends it.
-
-`F0` also picks single test screens. None of them answer, and each one stays up until the next `F0`:
-
-| `F0` value | shows |
+| value | animation |
 |---|---|
-| 00 | leave test mode |
+| 00 | rainbow triangle (same as `01 09`) |
+| 01 | spinning, morphing d20 |
+| 02 | blue sunburst |
+| 03 | car driving through a desert |
+
+04 and up reply `00` and do nothing. `01 09` (rainbow pyramid) and `01 22` (power-up screen = rainbow pyramid) are related display modes. All of these, like the clock, are **display modes that survive a power cut and leave the stored GIF intact**.
+
+### 4.5 Factory test patterns (01 F0)
+
+`01 F0` with one byte picks a test screen. None reply; each stays up until the next `F0`.
+
+| value | screen |
+|---|---|
+| 00 | leave test mode (return to previous display) |
 | 01 | solid red |
 | 02 | solid green |
 | 03 | solid blue |
 | 04 | solid white |
 | 05 | diagonal lines, moving |
-| 06 | horizontal lines moving down |
+| 06 | horizontal lines, moving down |
 | 07 | lines moving right |
-| 08 | the firmware version: `V1.1` on mine |
-| FF | the full cycle, the same as the L pad |
+| 08 | firmware version (`V1.1` on the test unit) |
+| FF | full cycle (same as the L-pad power-up test) |
 
-09 and 0A changed nothing. JSAUX's daemon has names for test patterns too (gradient, grid, checkerboard), but none of these values match those names, so their app may draw them itself.
+`F0 00` is also what the vendor daemon sends before every upload. Factory test mode can also be entered in hardware by holding the **L pad** to ground at power-up (§7); that mode is saved and returns on the next boot until cleared with `F0 00`.
 
-Careful on USB-A: the cycle includes full-screen white at the stored brightness, which is the picture that browned the panel out on the Steam Machine's USB-A port. If a panel in test mode keeps restarting there, plug it into USB-C and send `F0 00`.
+> **USB-A caution:** the full cycle and `F0 04` include full-screen white at the stored brightness, which can brown out the panel on a high-load USB-A port (see §8). If a panel in test mode keeps restarting, move it to USB-C and send `F0 00`.
 
-## Power
+## 5. Command 0x03 — download/transfer channel ⚠️
 
-The panel replays its stored picture and its brightness every time it powers on.
+**0x03 is a silent download/write channel, not a display command.** It is distinct from the GIF path, it is not used by the vendor app, and it is the one command that could plausibly brick the panel. Treat it as a firmware/asset loader.
 
-Solid white at brightness 100 on a Steam Machine USB-A port browned it out (seen). It dropped off USB, a Steam Controller dongle on another port dropped at the same moment, and the panel then reset over and over before USB could finish connecting. On a USB-C port it booted normally.
+- **Begin:** `01 03` with a header of **at least 6 bytes** (empty, 4- and 5-byte headers reply `00`; 6–16 bytes accepted). The header is **not** the GIF path's `[size][crc32]`: the first 4 bytes read as a small little-endian value are accepted, but a large value or one that fails an (unmapped) validity check is rejected — `…ff ff 00 00`, `…ff ff ff ff`, `…de ad be ef`, and even a real GIF's size+crc32 (`00 00 04 a4 6c ea a0 64`) all reply `00`.
+- **Stateful:** the first valid begin on a fresh panel replies `01` (ready); afterwards every valid begin replies `02` (a session is already open), until it times out — showing a white document icon with a red down-arrow and red X ("download failed") — or the panel is power-cycled. (Never-seen headers reply `02` immediately once armed, confirming `02` means "session open", not "this object already stored".)
+- **Data transport:** the same as the GIF path — `02 02 [u16 seq BE][≤498 bytes]` chunks, each replying `01`.
+- **It does not display:** streaming a full 64×54 frame's worth of data (10368 bytes, which is also the vendor app's `/v1/display/frame` size) was accepted chunk by chunk and showed **nothing** on the panel. So 0x03 swallows a complete transfer silently — a download/write path, not a way to show a frame.
+- **Unknown / unfinished:** what it writes, whether it touches flash, and the finalize/commit command it expects (the GIF end `0B` drew no reply on an open 0x03 session, which is likely why nothing ever committed and the panel stayed healthy). The firmware reports "firmware updates not supported", yet this channel exists; whether it reflashes running firmware, loads an asset, or is factory-only is unresolved.
 
-The limit on USB-A with solid white (seen): brightness 40, 50 and 60 each held for 8 s, and 70 browned out at once. That second time the panel came back by itself on USB-A within about 9 s.
+> **Do not send a commit/finalize to 0x03 until the flash chip has been dumped**, so a bad write is recoverable. No bootloader is reachable on any accessible pad (§7), so a corrupted panel would need chip-level recovery.
 
-Brightness 255 looked no different from 100, so the firmware most likely clamps at 100. JSAUX's daemon never sends more than 100, and it lowers brightness once the hottest system sensor passes 72 C, down to a floor of 8.
+## 6. What the panel does *not* have
 
-## Pictures
+- **No raw-pixel command** and **no way to show an image without storing it.** Every command 0x00–0xEF and both frame types have been probed; 0x03 was the last candidate and it displays nothing. The only way to show a picture is a GIF upload, which is a flash write.
+- **No host-visible "small change" path:** the vendor app itself re-encodes and re-uploads a whole GIF for every clock tick / dashboard update (~1/s), with no change detection. There is **no "GIFs over 20 KB use flash" threshold** anywhere in the vendor code; the firmware clock (§4.2) is the only zero-write way to keep time.
+- **No reachable bootloader** on the V/DM/DP/G/L header (§7).
 
-The panel only takes GIFs: GIF89a, 64x54, global palette, animated ones too. There's no command for raw pixels anywhere in the vendor code. In their code, the clock, stopwatch and hardware monitor all redraw by encoding a whole new GIF and uploading it again.
+## 7. Hardware
 
-The panel keeps the last GIF in flash. Unplug it, plug it back in, and the same picture comes back (seen).
+Board silkscreen: `DY LED-64X54-02` ("DY" = the serial magic). An LED matrix behind a liftable white diffuser and a smoked front; like a shrunken HUB75 panel with the controller on the back.
 
-## Speed (seen)
+| part | marking | job |
+|---|---|---|
+| U1–U30 (24×) | FM 6124EJ | 16-ch constant-current column drivers (24×16 = 384 = 64 cols × RGB × 2 halves; likely scans two 27-row halves) |
+| U21, U31, +2 (left edge) | FM TC6960C | row-scan drivers |
+| U10, U20 | 74HC245 | buffers between MCU and driver chain |
+| U11 | blank top | MCU, LQFP-48, 24 MHz crystal (not STM32, not ESP32) |
+| U22 | 25Q016B | 16 Mbit (2 MB) SPI NOR flash, SOIC-8 — most likely where GIF uploads land (MCU has its own flash too, so unproven) |
+| U36 | WCH CH340N | USB-serial bridge |
+| U33 | V05 | USB ESD protection (probable) |
+| — | HT7533 | 3.3 V regulator |
 
-| GIF | begin accepted | chunks done | end ACK |
-|---|---|---|---|
-| 95 B (solid color) | 10-50 ms | 20-60 ms | 120-140 ms |
-| ~2 KB (plasma) | ~50 ms | ~105 ms | ~210 ms |
+**Bottom-edge header** (V, DM, DP, G, L, ~2 mm pitch), measured with the panel running:
 
-The wait between the last chunk and the end ACK grows with file size at about 80 ms per 4 KB, and not with frame count:
+| pad | V to GND | what it is |
+|---|---|---|
+| V | 5.05 V | USB 5 V in |
+| DM | 0.11 V | MCU USB D−, idle |
+| DP | 0 V | MCU USB D+, idle (nothing pulls it up — MCU USB off in normal use) |
+| G | 0 V | ground |
+| L | 3.3 V | factory-test strap |
+
+- **L→G while running:** nothing (panel keeps answering; L is not reset).
+- **L→G at power-up:** starts the factory test pattern (§4.5), and the panel saves that mode across power cuts until `F0 00`.
+- A USB cable on DM/DP/G enumerates no device, with or without L held at boot.
+- No bootloader answers on the CH340 at 115200 (STM32 `0x7F` 8E1 sync, or WCH identify), with or without L. So the MCU bootloader, if any, is not on a reachable pad. Two small **unlabeled round pads near C14**, below the MCU, are likely a debug port (unmeasured — candidate for SWD).
+
+The FM6124 has no PWM, so the MCU makes shades by switching LEDs quickly; the vendor app snaps much of its art to 64 colours (2 bits/channel), though the panel shows smooth 64-step R/G/B/W ramps (seen).
+
+## 8. Power & timing
+
+- The panel replays its stored picture and brightness on every power-up.
+- **Brightness** is clamped at 100 (255 looks identical to 100). The vendor daemon never exceeds 100 and drops brightness once the hottest system sensor passes 72 °C, to a floor of 8.
+- **Brownout (seen):** solid white at brightness 100 on a Steam Machine USB-A port browned the panel out (it dropped off USB, took a neighbouring dongle with it, and reset repeatedly). On USB-C it booted fine. USB-A solid-white limit: 40/50/60 held 8 s each; 70 browned out immediately.
+- **Upload timing (seen):** the wait between the last chunk and the end-ACK grows ≈80 ms per 4 KB of GIF, independent of frame count — consistent with erasing/programming one SPI-flash sector at a time (i.e. every upload is a flash write). After the end-ACK the panel ignores a new begin for ≈40 ms, so the ceiling is ~5 small frames/second.
 
 | GIF | bytes | 4 KB blocks | end ACK |
 |---|---|---|---|
@@ -168,4 +200,25 @@ The wait between the last chunk and the end ACK grows with file size at about 80
 | 1 noisy frame | 5,501 | 2 | 216 ms |
 | 12 noisy frames | 57,813 | 15 | 1,238 ms |
 
-That's what erasing and programming one SPI flash sector at a time looks like, so every upload is a flash write. After the end ACK the panel ignores a new begin for roughly 40 ms, which puts the ceiling around 5 small frames per second.
+---
+
+## Appendix A — How this was worked out
+
+Dated lab notes and provenance, kept separate from the reference above. First person = the investigator on the bench unit.
+
+- **Source.** The command table came from decompiling JSAUX's PIXEL V1.0 beta (2026-09-18): daemon + studio (both unstripped, Ghidra) and the Decky plugin. The vendor software builds only seven frame types (power, brightness, GIF begin/chunk/end, `21`, `F0`) and draws clock/weather/dashboard/timers as per-second GIF uploads. It has no firmware-update code, no version query, and no 20 KB threshold.
+- **Hidden commands** were found by sending each unused command number 0x00–0x20 once with an empty payload and checking that `01 01` still answered. 0x00, 0x06–0x08, 0x0A and 0x0C–0x1F stayed silent. On 2026-10-13 (with the owner's go-ahead) the sweep went up to 0xEF and across every frame type: 0x22 → power-up screen; 0x23–0xEF silent; types 00 and 03–FF silent. 0xF1–0xFF were left alone as the likeliest home of a bootloader/erase command.
+- **Clock (0x05)** was decoded on 2026-10-13. Earlier attempts had sent the time to 0x03 (wrong command). The zero-based month/day and the "send all 7 bytes" rule were confirmed by watching the panel; a byte placed after the day lands in the hour (no weekday field).
+- **Silent-command fuzzing.** Every silent type-01 command (00, 06–08, 0A, 0C–1F, 23–EF) got four payloads (`01`, `FF`, `00 15`, `01 02 03 04`) while a camera watched a still picture (`tools/lab_camfuzz.py`): no change in 920 frames. A second, clock-aimed camera fuzz on 2026-10-13 (690 frames + a retest) searched for a command that alters the clock's colour/font/format: nothing moved but the ticking minute and the blinking colon — **no hidden clock-style command** in the ranges tried.
+- **Latency check.** `01 05`-with-time, `01 20` and `01 21` reply as fast as screen power (~54 ms from a Mac), so none erases a flash sector before replying; whether they persist anything afterwards (the modes do survive a power cut) is unmeasured.
+- **Type-02 probing** is uninformative: type 02 replies `00` to every cmd 0x00–0x21 when no upload is open, chunk command included.
+- **0x03 history.** First seen 2026-10-09 when date-shaped payloads `ea 07 00 00 00 00 00` and `07 ea 00 00 05 00 00 00` returned `02` and later produced the "download failed" icon. On an earlier day the clock's month once flipped 01→03 after a batch of 0x03 attempts — possibly a side effect of this channel. The §5 header/stateful/transport/"displays nothing" findings were measured 2026-10-13 with the owner's explicit go-ahead and brick risk accepted; `tools/lab.py` gates 0x03 behind a `PROBE_03` token so it cannot fire by accident. No commit was ever sent, so nothing was written and the panel stayed healthy throughout.
+- **Open hardware steps:** dump U22 (and read the two round pads near C14 via SWD, read-only first) to answer what 0x03 writes, whether uploads wear the flash, and to get a backup before any 0x03 commit is attempted.
+
+## Appendix B — Tools
+
+In `tools/` (this repo):
+
+- `bootprobe.py PORT {link,watch,testoff,stm,wch,listen,send}` — link check, bootloader probes, `F0 00`, and a `send` limited to the safe commands (21/F0/05/09).
+- `lab.py` / `lab_serve.py` — bench probing (every frame logged). 0x03 is gated behind `PROBE_03`; the `PAST_GUARD` token lifts the above-0x21 guard for empty-payload sweeps. Use only deliberately.
+- `lab_camfuzz.py` — sends a frame plan and flags any that change the screen, using a camera.

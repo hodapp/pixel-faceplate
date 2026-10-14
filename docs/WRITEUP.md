@@ -8,7 +8,9 @@ This is the long version of how I worked out what the [JSAUX Pixel Matrix Facepl
 
 The faceplate arrived with install instructions that go roughly like this: switch to Desktop Mode, run their Decky installer, copy a folder into `/home/deck`, double-click a `.desktop` file, approve an admin prompt. That gets you a background daemon, a desktop app and a Decky plugin. Before giving all of that root access to my Steam Machine I wanted to know what it does, so I read it first.
 
-Some context on me: I'm old as dirt, I was a software engineer in a past life, and now I take gadgets apart for fun and write a lot of custom ESP32 firmware for smart home stuff around my house. I'm writing this up so the next person who wants to do something cool with this panel doesn't have to start from scratch.
+Some context on me: I'm old as dirt, I was a software engineer in a past life, and these days I take gadgets apart for fun and write a lot of custom ESP32 firmware for the smart home stuff around my house. I've built my own pixel matrices, too, the kind that sit in a server rack and just display something cool. So when JSAUX sold this one as an open-source device, that is exactly the thing that caught my eye, and honestly most of why I bought it.
+
+What I keep running into is that "open source" here seems to mean you can do some custom stuff through their app, and every time I go looking for the actual openness, the goalposts have moved. Either they don't know what open source means or they're quietly walking it back. That's what made me say screw it and take the whole thing apart properly. I'm writing this up so the next person who wants to do something cool with this panel doesn't have to start from scratch.
 
 ## Reading their package
 
@@ -25,7 +27,7 @@ The Decky plugin is readable source, and the daemon still has its function names
 - The Japanese UI text calls the product a "128x128 matrix display". This panel is 64x54.
 - The desktop app has a Firmware page that says "Firmware updates are not supported yet".
 
-None of it looks malicious to me. It does look like software that shipped in a hurry.
+None of it looks malicious to me. It does look like software that shipped in a hurry. There's a fuller rundown of what their software does, including the AI-agent behaviour, in [VENDOR-SOFTWARE.md](VENDOR-SOFTWARE.md).
 
 The useful part was the serial code. The Python plugin has an old code path that talks to the panel directly, so the frame format was right there: a "DY" header, a type, a command, a length, the payload and a CRC-16. Pictures are uploaded as GIF files in 498-byte chunks. The daemon's `ProtocolCodec` class builds exactly seven kinds of frame, so that's everything their software can say to the panel.
 
@@ -210,18 +212,24 @@ That's a "download failed" screen. As far as I can tell, `03` starts some kind o
 
 It's good to know the firmware can take a download at all. It's also where I'm stopping. Giving up when nothing arrives is the easy part. What I can't tell from the outside is what it does when something does arrive, and a lot of cheap devices handle updates crudely: erase the old firmware first, then write the new one, and hope. If this panel works like that, one wrong guess wipes it, and there's no way to put the firmware back. So `03` is off limits until I have a backup and a real plan.
 
+## Coming back to the clock and 0x03
+
+A few days later I came back to it with the panel on a bench, a camera watching it, and the time to be thorough. Two things got answered.
+
+First, the clock. It turns out `0x05` sets the time itself, not `0x03`. Send `0x05` with seven bytes, a big-endian year followed by month, day, hour, minute and second, and it shows. Month and day count from zero, which threw me for a while. The catch is that the time lives in RAM only. Pull the power and it resets and comes back on its power-up animation, so whatever drives the clock has to set it again on every boot. The upside is huge for the wear question: a firmware clock that updates itself costs zero flash writes, where JSAUX's own app redraws the clock as a new GIF upload every single second. If you want a clock on this panel and you care about the flash, this is the way to do it, and their software doesn't.
+
+Then I went at `0x03` properly, carefully, with a backup plan for the display and a rule that I'd never send a "finish" to it without a way to recover. Here's what it does. It takes a header of at least six bytes, and it's picky about it: a real GIF's size and checksum get rejected, random high-value bytes get rejected, but a small, sane-looking value is accepted. So it's doing real validation on whatever you hand it. Once you start one, it stays "open" until it times out to that download-failed icon or you power-cycle. The data streams in on the exact same chunks a GIF upload uses. I fed it everything I could think of, including valid-looking inputs borrowed from the other commands and a full raw video frame's worth of data, and the panel accepted all of it and displayed absolutely nothing. It just swallows the data silently.
+
+So I'm about 90% sure `0x03` is the firmware update path. It's a separate channel from the picture upload, it checks what you send it the way a loader checks an image, it shows a download icon when a transfer fails, and it never puts anything on the screen. That's good news and bad news. The good news is the hardware can clearly take a firmware download over the normal cable, which means JSAUX could come to their senses and ship open firmware, or just release the firmware source, and this panel would get a lot more interesting. The bad news is that the way they keep backpedaling on "open source," I'm not holding my breath.
+
+I also did a real search for any other LED matrix controller that speaks a protocol like this one, in English and in Chinese, by chip part, by the "DY" frame signature, by the panel's odd 64x54 size. Nothing. No datasheet, no other project, no vendor. Whoever makes this board uses a protocol that isn't documented anywhere public.
+
 ## Where that leaves things
 
-I'm still willing to assume good intent from JSAUX. But here's what their product page says:
+I've got a chip clip coming on Friday to read the 25Q016B flash, which is a SOIC-8 and can be read without soldering. That answers the wear question, dump it, upload a few pictures, dump it again, see what moved, and it gives me a backup before I'd ever try finishing a `0x03` transfer. What it won't do is give me the actual firmware, because that almost certainly lives inside the microcontroller, not on that flash chip, and even if I could get it off the MCU I'm not sure it would decompile into anything useful.
 
-> 【App Control and Custom Content】Control either display with the companion app. Choose from preset display modes or upload your own images. For developers, the Pixel Matrix Panel also supports open-source code for creating custom multi-zone layouts. (App interface and available display modes may vary)
+So here's the honest summary. This is sold as an open-source device. It's built by people who sanded the part number off the microcontroller, whose factory pads don't open anything without a soldering iron, whose cable exposes no bootloader, and whose firmware is closed and, as of right now, officially not updatable, even though it has every telltale sign of a firmware update path sitting right there in `0x03`. Their idea of "open source," as far as I can tell, is that you'll be able to do custom things through their app. What people like me actually want is the ability to flash this thing with our own firmware. Those are not the same thing, and selling the second one while delivering the first is the part that bugs me.
 
-I don't know what open-source support there actually is at this point, beyond people reverse engineering JSAUX's software and getting things more or less working, which is what I did. And the hardware points the other way. The microcontroller's part number is sanded off, the factory pads don't open anything without a soldering iron, nothing answers as a bootloader over the cable, and the software can't update the firmware. If this was built to be an open platform, that seems suspect. Maybe the source shows up and it all makes sense. I'm not counting on it making going deeper easy.
-
-What's left is a chip clip on the 25Q016B flash chip, which is a SOIC-8 and can be read without soldering. That won't give me the microcontroller's program, which probably lives inside the chip itself, but it should show how pictures are laid out in flash, and that answers the wear question: dump it, upload a few pictures, dump it again and see what moved. I've ordered a clip and I'll write up whatever turns up.
-
-So this is a natural stopping point. Everything I could try safely, I've tried. The commands that are left are either unknown, or the update path, and guessing at either one is how you brick a panel that has no recovery.
-
-Overall, it's a really cool piece of kit, and it'd get a lot cooler with the source and a way to update the firmware. With those there's no reason we couldn't stream straight to the screen without touching flash. Until then, I'm waiting on JSAUX, and on the clip.
+It really is a cool piece of kit, and it'd be a lot cooler open. With the source and a way to update the firmware there's no reason you couldn't stream straight to the screen without touching flash at all. Until then, this repo has everything I've found, all the tools to poke at it yourself, and the full command table in [PROTOCOL.md](../PROTOCOL.md).
 
 If you have answers, or one of these faceplates and a different result, open an issue.
