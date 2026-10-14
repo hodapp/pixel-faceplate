@@ -156,7 +156,7 @@ I measured the limit on USB-A with solid white: brightness 40, 50 and 60 each he
 
 ## How it works
 
-The short version: the panel is a CH340 USB serial device at 1,000,000 baud. Messages start with "DY", carry a command and a CRC, and pictures go up as GIFs in 498-byte chunks. [PROTOCOL.md](PROTOCOL.md) has every command, timing and what's on the board, and [docs/WRITEUP.md](docs/WRITEUP.md) is the story of figuring it out, with photos.
+The short version: the panel is a CH340 USB serial device at 1,000,000 baud. Messages start with "DY", carry a command and a CRC, and pictures go up as GIFs in 498-byte chunks. [PROTOCOL.md](PROTOCOL.md) has every command, timing and what's on the board; [docs/WRITEUP.md](docs/WRITEUP.md) is the story of figuring it out, with photos, and [docs/VENDOR-SOFTWARE.md](docs/VENDOR-SOFTWARE.md) sums up what JSAUX's own software does.
 
 SteamOS doesn't have Pillow or pyserial, so the plugin has its own small GIF encoder, opens the serial port with `termios`, and decodes artwork with GStreamer.
 
@@ -171,7 +171,7 @@ pnpm test         # Python tests (the GIF round-trip tests also want Pillow)
 pnpm package      # out/Pixel-Faceplate-v<version>.zip
 ```
 
-`tools/` holds the scripts used to work out the protocol: `probe.py` (send commands by hand), `scan.py`, `sizetime.py`, `steptest.py`, `rescue.py` and `bootprobe.py` (looks for a bootloader, and turns factory test mode off). Read their headers before running them. A few of them write to the panel's flash or push it towards its power limit on purpose.
+`tools/` holds the scripts used to work out the protocol: `probe.py` (send commands by hand), `scan.py`, `sizetime.py`, `steptest.py`, `rescue.py`, `bootprobe.py` (looks for a bootloader, and turns factory test mode off), and the `lab*.py` bench tools (`lab_camfuzz.py` watches the panel with a camera while it sends commands). Read their headers before running them. A few of them write to the panel's flash or push it towards its power limit on purpose.
 
 ## Thanks, GabeCubeAura
 
