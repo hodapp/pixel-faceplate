@@ -61,7 +61,7 @@ To check that it really is flash, I timed the gap between the last chunk and the
 
 The time follows the file size at about 80 ms per 4 KB, and doesn't care how many frames there are. That's what erasing and rewriting flash a sector at a time looks like.
 
-This is the part that bothers me. Flash wears out. The 25Q016B chip on the board is a normal part, and chips like it are usually rated for around 100,000 erases per 4 KB sector. JSAUX's own stopwatch and countdown modes upload a new GIF every second. If the firmware keeps rewriting the same sector, that's about a day of running before it passes its rating. If the firmware spreads its writes across the whole 2 MB, it's fine for years. You can't tell which from outside the panel.
+This is the part that bothers me. Flash wears out. The 25Q016B chip on the board is a normal part, and chips like it are usually rated for around 100,000 erases per 4 KB sector. JSAUX's own stopwatch and countdown modes upload a new GIF every second. If the firmware keeps rewriting the same sector, that's about a day of running before it passes its rating. If the firmware spreads its writes across the whole 2 MB, it's fine for years. You can't tell which from outside the panel. (Later I read the chip directly and got my answer: it's the same sectors every time. That's [further down](#reading-the-flash-chip).)
 
 ## Opening it up
 
@@ -224,11 +224,31 @@ So I'm about 90% sure `0x03` is the firmware update path. It's a separate channe
 
 I also did a real search for any other LED matrix controller that speaks a protocol like this one, in English and in Chinese, by chip part, by the "DY" frame signature, by the panel's odd 64x54 size. Nothing. No datasheet, no other project, no vendor. Whoever makes this board uses a protocol that isn't documented anywhere public.
 
+## Reading the flash chip
+
+The clip finally showed up from China, so I wired it to a Raspberry Pi 5 and read U22 (the flash chip, which turned out to be a CIU25Q016B from a maker that never registered its ID, so no datasheet) before and after every command I could send the panel. Each read twice, hashes compared, and kept only if they matched.
+
+![The bench: a Pi 5 wired to a SOIC-8 clip on U22](../flash/photos/bench-clip-on-u22.jpg)
+
+I figured it'd be boring. A file system, some normal flash management, maybe a couple fun surprises. Nope. There's a 256 byte settings record in sector 0, the live picture at 0x0A000, an upload buffer at 0x3C000, and that's it, the rest of the 2 MB is empty. Every new picture erases sector 0 plus the same picture sectors at the same addresses, twice (once into the buffer, once into the live copy). Changing the brightness rewrites sector 0. Picking a built-in animation rewrites sector 0 and makes the panel forget its picture, so going back to it is a full upload again. No wear leveling at all. The one thing they got right is that a cut-off or corrupted upload never touches the old picture.
+
+So the "about a day" guess from earlier was pretty close: if the chip's good for the usual 100,000 erases, JSAUX's clock screen gets there in about 28 hours. And there's no firmware on the chip at all, it's all inside the microcontroller. Every dump, the diffs and how to do this yourself are in [flash/](../flash/README.md).
+
+![It got messier as the night went on](../flash/photos/bench-later-that-night.jpg)
+
+## Looking for a debug port
+
+With the firmware stuck inside the MCU, the only way to read it is the chip's debug port, if it has one and it isn't locked. So I got pogo pins on every pad I could reach, the two little round ones below C14, the L/DP and L/DM pads on the header, and checked a couple more, and ran OpenOCD from the Pi on each pair, both ways round, read-only.
+
+![Pogo pins on the L and DP pads](../flash/photos/swd-s6-pogos-l-dp.jpg)
+
+Nothing answered. I checked the Pi was really putting a clock out (it was) and then mapped which of the MCU's legs are ground: 1, 12, 13 and 36, which doesn't match the STM32-style layout every ARM clone I'd expect here copies. So it's either an ARM chip with its debug port locked for good, or a cheaper LED controller chip with no debug port at all. I can't tell which from here. Either way the firmware isn't coming off this board. The pad-by-pad log is in [flash/SWD.md](../flash/SWD.md).
+
 ## Where that leaves things
 
-I've got a chip clip coming on Friday to read the 25Q016B flash, which is a SOIC-8 and can be read without soldering. That answers the wear question, dump it, upload a few pictures, dump it again, see what moved, and it gives me a backup before I'd ever try finishing a `0x03` transfer. What it won't do is give me the actual firmware, because that almost certainly lives inside the microcontroller, not on that flash chip, and even if I could get it off the MCU I'm not sure it would decompile into anything useful.
+The flash question's answered, and the firmware's out of reach. I've got a stock backup of the flash chip now, but that only covers the pictures and settings, so I'm still not finishing a `0x03` transfer. If that does write the MCU's firmware and goes wrong, there's nothing to put back.
 
-So here's the honest summary. This is sold as an open-source device. It's built by people who sanded the part number off the microcontroller, whose factory pads don't open anything without a soldering iron, whose cable exposes no bootloader, and whose firmware is closed and, as of right now, officially not updatable, even though it has every telltale sign of a firmware update path sitting right there in `0x03`. Their idea of "open source," as far as I can tell, is that you'll be able to do custom things through their app. What people like me actually want is the ability to flash this thing with our own firmware. Those are not the same thing, and selling the second one while delivering the first is the part that bugs me.
+So here's the honest summary. This is sold as an open-source device. It's built by people who sanded the part number off the microcontroller, whose factory pads don't open anything and whose debug port, if there is one, doesn't answer, whose cable exposes no bootloader, whose flash gets hammered in the same spots with no wear leveling, and whose firmware is closed and, as of right now, officially not updatable, even though it has every telltale sign of a firmware update path sitting right there in `0x03`. Their idea of "open source," as far as I can tell, is that you'll be able to do custom things through their app. What people like me actually want is the ability to flash this thing with our own firmware. Those are not the same thing, and selling the second one while delivering the first is the part that bugs me.
 
 It really is a cool piece of kit, and it'd be a lot cooler open. With the source and a way to update the firmware there's no reason you couldn't stream straight to the screen without touching flash at all. Until then, this repo has everything I've found, all the tools to poke at it yourself, and the full command table in [PROTOCOL.md](../PROTOCOL.md).
 

@@ -1,0 +1,4 @@
+1 of 512 sectors differ
+  0x000000-0x001000 (1 sectors): used before 256 B, after 256 B, 1 bytes changed, bits 0->1 1 (erase), 1->0 0
+    sector 0x000000: 0->1 bits 1
+record byte 0x3d: 00 -> 01

@@ -1,0 +1,4 @@
+1 of 512 sectors differ
+  0x03c000-0x03d000 (1 sectors): used before 4096 B, after 4096 B, 4061 bytes changed, bits 0->1 8395 (erase), 1->0 7255
+    sector 0x03c000: 0->1 bits 8395
+digit2.gif: in A at ['0xa000', '0x3c000'], in B at ['0xa000']

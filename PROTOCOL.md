@@ -143,15 +143,16 @@ Month and day are **zero-based** (September = 8, the 1st = 0); hour/minute/secon
 - **Stateful:** the first valid begin on a fresh panel replies `01` (ready); afterwards every valid begin replies `02` (a session is already open), until it times out — showing a white document icon with a red down-arrow and red X ("download failed") — or the panel is power-cycled. (Never-seen headers reply `02` immediately once armed, confirming `02` means "session open", not "this object already stored".)
 - **Data transport:** the same as the GIF path — `02 02 [u16 seq BE][≤498 bytes]` chunks, each replying `01`.
 - **It does not display:** streaming a full 64×54 frame's worth of data (10368 bytes, which is also the vendor app's `/v1/display/frame` size) was accepted chunk by chunk and showed **nothing** on the panel. So 0x03 swallows a complete transfer silently — a download/write path, not a way to show a frame.
-- **Unknown / unfinished:** what it writes, whether it touches flash, and the finalize/commit command it expects (the GIF end `0B` drew no reply on an open 0x03 session, which is likely why nothing ever committed and the panel stayed healthy). The firmware reports "firmware updates not supported", yet this channel exists; whether it reflashes running firmware, loads an asset, or is factory-only is unresolved.
+- **Unknown / unfinished:** what it writes, whether it touches flash, and the finalize/commit command it expects (the GIF end `0B` drew no reply on an open 0x03 session, which is likely why nothing ever committed and the panel stayed healthy). The firmware reports "firmware updates not supported", yet this channel exists; whether it reflashes running firmware, loads an asset, or is factory-only is unresolved. The flash dumps (§9) show U22 holds no firmware at all, so if 0x03 reflashes anything, it's the MCU's own internal flash.
 
-> **Do not send a commit/finalize to 0x03 until the flash chip has been dumped**, so a bad write is recoverable. No bootloader is reachable on any accessible pad (§7), so a corrupted panel would need chip-level recovery.
+> **Don't send a commit/finalize to 0x03.** U22 is backed up now ([`flash/u22-stock-2026-10-16.bin`](flash/u22-stock-2026-10-16.bin)), but that only covers the pictures and settings. If 0x03 writes the MCU's firmware and it goes wrong, there's no bootloader and no debug port on any pad I could find (§7), so nothing to restore it with.
 
 ## 6. What the panel does *not* have
 
 - **No raw-pixel command** and **no way to show an image without storing it.** Every command 0x00–0xEF and both frame types have been probed; 0x03 was the last candidate and it displays nothing. The only way to show a picture is a GIF upload, which is a flash write.
 - **No host-visible "small change" path:** the vendor app itself re-encodes and re-uploads a whole GIF for every clock tick / dashboard update (~1/s), with no change detection. There is **no "GIFs over 20 KB use flash" threshold** anywhere in the vendor code, and none on the panel either: GIFs from 1 KB up, still or animated, all survive a power cut (§8). The firmware clock (§4.2) is the only zero-write way to keep time.
-- **No reachable bootloader** on the V/DM/DP/G/L header (§7).
+- **No reachable bootloader** on the V/DM/DP/G/L header, and **no debug port** answers on any pad (§7, [flash/SWD.md](flash/SWD.md)).
+- **No wear leveling.** Every upload, brightness change and built-in pick rewrites the same sectors at the same addresses (§9).
 
 ## 7. Hardware
 
@@ -162,8 +163,8 @@ Board silkscreen: `DY LED-64X54-02` ("DY" = the serial magic). An LED matrix beh
 | U1–U30 (24×) | FM 6124EJ | 16-ch constant-current column drivers (24×16 = 384 = 64 cols × RGB × 2 halves; likely scans two 27-row halves) |
 | U21, U31, +2 (left edge) | FM TC6960C | row-scan drivers |
 | U10, U20 | 74HC245 | buffers between MCU and driver chain |
-| U11 | blank top | MCU, LQFP-48, 24 MHz crystal (not STM32, not ESP32) |
-| U22 | 25Q016B | 16 Mbit (2 MB) SPI NOR flash, SOIC-8 — most likely where GIF uploads land (MCU has its own flash too, so unproven) |
+| U11 | sanded off | MCU, LQFP-48, 24 MHz crystal. Ground on legs 1, 12, 13 and 36, which isn't the STM32F1/F0 layout the GD32/AT32/CH32 clones copy ([flash/SWD.md](flash/SWD.md)). Holds the firmware and the built-in animations |
+| U22 | CIU25Q016B, T16T | 16 Mbit (2 MB) SPI NOR flash, SOIC-8, JEDEC ID `49 65 15` (unregistered maker, no datasheet found). Holds the uploaded GIF, the upload buffer and a settings record, no firmware (seen, §9) |
 | U36 | WCH CH340N | USB-serial bridge |
 | U33 | V05 | USB ESD protection (probable) |
 | — | HT7533 | 3.3 V regulator |
@@ -181,7 +182,7 @@ Board silkscreen: `DY LED-64X54-02` ("DY" = the serial magic). An LED matrix beh
 - **L→G while running:** nothing (panel keeps answering; L is not reset).
 - **L→G at power-up:** starts the factory test pattern (§4.5), and the panel saves that mode across power cuts until `F0 00`.
 - A USB cable on DM/DP/G enumerates no device, with or without L held at boot.
-- No bootloader answers on the CH340 at 115200 (STM32 `0x7F` 8E1 sync, or WCH identify), with or without L. So the MCU bootloader, if any, is not on a reachable pad. Two small **unlabeled round pads near C14**, below the MCU, are likely a debug port (unmeasured — candidate for SWD).
+- No bootloader answers on the CH340 at 115200 (STM32 `0x7F` 8E1 sync, or WCH identify), with or without L. So the MCU bootloader, if any, is not on a reachable pad. The two small round pads near C14, below the MCU, are pulled up to 3.3 V and don't answer SWD either way round. Neither do L/DP or L/DM. Pads "1" and "2" between U20 and U11 are busy MCU outputs, probably the LED chain. Full log in [flash/SWD.md](flash/SWD.md).
 
 The FM6124 has no PWM, so the MCU makes shades by switching LEDs quickly; the vendor app snaps much of its art to 64 colours (2 bits/channel), though the panel shows smooth 64-step R/G/B/W ramps (seen).
 
@@ -218,7 +219,31 @@ JSAUX stated publicly (2026-10-10) that static images and the app's built-in dis
 - Every GIF survived the power cut. The end ACK grows steadily at ≈19 ms/KB (the same ≈80 ms per 4 KB as above), with no step at 20 KB. A still and an animated GIF of the same size take the same time.
 - The board has no battery: the firmware clock (§4.2) loses its date on the same power cut. A GIF that survives was written to non-volatile memory.
 - **Verdict: every GIF upload is a flash write**, from 1 KB up, still or animated. The firmware's own modes (`05` clock, `09`, `21 00–03`) show without an upload and leave the stored GIF in place, but the clock, dashboard and timer screens in JSAUX's app are GIFs re-uploaded about once a second (§6), and each distinct one is stored.
-- Not yet known: where on the 25Q016B each upload lands, i.e. whether the firmware rotates sectors. That needs a flash dump before and after an upload.
+- Where each upload lands, and whether anything rotates: answered by dumping the chip, see §9. It doesn't rotate.
+
+## 9. Flash layout and what writes it (seen)
+
+I read U22 with a SOIC-8 clip and a Pi 5 before and after every command, 2026-10-16 and 17. Every dump, hash, diff report and the step-by-step log is in [flash/README.md](flash/README.md), along with how to do it yourself. This is the short version.
+
+Only three places on the chip ever change. Everything else is FF, and there's no firmware in it at all, no vector table, not a single string. The firmware and the built-in animations live in the MCU's own flash.
+
+| offset | what |
+|---|---|
+| `0x000000` | a 256 byte settings record. `0x02` display mode (00 GIF, 01 built-in), `0x05` saved brightness, `0x3D` built-in number, `0x0C` u32 LE stored GIF size, `0x10` u32 LE its CRC32. The rest isn't decoded |
+| `0x00A000` | the live GIF, starting on a sector boundary |
+| `0x03C000` | the upload buffer. Chunks stream in here one 4 KB sector at a time, and only after the end frame does the panel copy it to 0x00A000 and rewrite the record |
+
+So a GIF upload erases `1 + 2 × ceil(size / 4096)` sectors, the same addresses every time, which is exactly the ~80 ms per 4 KB in §8 (two erases per 4 KB). A begin frame gets 02 when its size and CRC32 match the record, and then nothing gets written. Pull the power halfway through, or send a bad CRC, and the old picture and record stay put. Good, at least they got that part right.
+
+What writes sector 0 and what doesn't:
+
+- GIF upload: always, plus the GIF's own sectors twice. Static or animated, any size.
+- Same GIF again: nothing, the panel answers 02.
+- Brightness `01 02`: a real change gets saved and stalls the panel ~190 ms. The same value again does nothing.
+- Built-in pick `01 21`: saved. Picking one also zeroes the stored GIF's size and CRC, so going back to the picture you had is a full re-upload even though it's still sitting at 0x00A000.
+- Screen off/on (`01 01`), booting, playing a built-in: nothing. I only tested `01 21` for the record clearing, not the clock (`05`) or pyramid (`09`).
+
+Nothing spreads the wear around, so sector 0 and the first sector of each GIF slot take one erase per upload, and sector 0 also takes one per brightness change or built-in pick. I couldn't find a datasheet for the CIU25Q016B so there's no real endurance number. If it's the usual 100,000 cycles, JSAUX's own clock and dashboard screens (one upload a second) would hit it in about 28 hours of use, a once-a-minute clock in about 69 days, and Pixel Faceplate's once per game launch in decades. Chips usually beat their rating by a lot so that's more of a floor than anything.
 
 ---
 
@@ -230,10 +255,10 @@ Dated lab notes and provenance, kept separate from the reference above. First pe
 - **Hidden commands** were found by sending each unused command number 0x00–0x20 once with an empty payload and checking that `01 01` still answered. 0x00, 0x06–0x08, 0x0A and 0x0C–0x1F stayed silent. On 2026-10-13 (with the owner's go-ahead) the sweep went up to 0xEF and across every frame type: 0x22 → power-up screen; 0x23–0xEF silent; types 00 and 03–FF silent. 0xF1–0xFF were left alone as the likeliest home of a bootloader/erase command.
 - **Clock (0x05)** was decoded on 2026-10-13. Earlier attempts had sent the time to 0x03 (wrong command). The zero-based month/day and the "send all 7 bytes" rule were confirmed by watching the panel; a byte placed after the day lands in the hour (no weekday field).
 - **Silent-command fuzzing.** Every silent type-01 command (00, 06–08, 0A, 0C–1F, 23–EF) got four payloads (`01`, `FF`, `00 15`, `01 02 03 04`) while a camera watched a still picture (`tools/lab_camfuzz.py`): no change in 920 frames. A second, clock-aimed camera fuzz on 2026-10-13 (690 frames + a retest) searched for a command that alters the clock's colour/font/format: nothing moved but the ticking minute and the blinking colon — **no hidden clock-style command** in the ranges tried.
-- **Latency check.** `01 05`-with-time, `01 20` and `01 21` reply as fast as screen power (~54 ms from a Mac), so none erases a flash sector before replying; whether they persist anything afterwards (the modes do survive a power cut) is unmeasured.
+- **Latency check.** `01 05`-with-time, `01 20` and `01 21` reply as fast as screen power (~54 ms from a Mac), so none erases a flash sector before replying; the flash dumps later showed `01 21` does save to sector 0 after replying (§9).
 - **Type-02 probing** is uninformative: type 02 replies `00` to every cmd 0x00–0x21 when no upload is open, chunk command included.
 - **0x03 history.** First seen 2026-10-09 when date-shaped payloads `ea 07 00 00 00 00 00` and `07 ea 00 00 05 00 00 00` returned `02` and later produced the "download failed" icon. On an earlier day the clock's month once flipped 01→03 after a batch of 0x03 attempts — possibly a side effect of this channel. The §5 header/stateful/transport/"displays nothing" findings were measured 2026-10-13 with the owner's explicit go-ahead and brick risk accepted; `tools/lab.py` gates 0x03 behind a `PROBE_03` token so it cannot fire by accident. No commit was ever sent, so nothing was written and the panel stayed healthy throughout.
-- **Open hardware steps:** dump U22 (and read the two round pads near C14 via SWD, read-only first) to answer what 0x03 writes, whether uploads wear the flash, and to get a backup before any 0x03 commit is attempted.
+- **Hardware, 2026-10-16/17.** U22 dumped with a SOIC-8 clip on a Raspberry Pi 5, before and after every command (§9, [flash/README.md](flash/README.md), all dumps included). Then SWD on every reachable pad, read-only, nothing answered ([flash/SWD.md](flash/SWD.md)). What 0x03 writes is still open.
 
 ## Appendix B — Tools
 
@@ -242,4 +267,9 @@ In `tools/` (this repo):
 - `bootprobe.py PORT {link,watch,testoff,stm,wch,listen,send}` — link check, bootloader probes, `F0 00`, and a `send` limited to the safe commands (21/F0/05/09).
 - `lab.py` / `lab_serve.py` — bench probing (every frame logged). 0x03 is gated behind `PROBE_03`; the `PAST_GUARD` token lifts the above-0x21 guard for empty-payload sweeps. Use only deliberately.
 - `lab_camfuzz.py` — sends a frame plan and flags any that change the screen, using a camera.
+- `u22.sh idle|read OUT.bin`: on the Pi, switch the SOIC clip between a passive tap and a verified read of U22 (two reads at 0.5 MHz that must match). Read-only.
+- `flashdiff.py upload|send|cmd|busy|diff`: one test upload or control command over the normal path (never 0x03), and a sector-by-sector diff of two dumps that counts 0→1 bits to spot erases.
+- `chipid.py OUT.json`: U22's JEDEC/REMS IDs, SFDP, unique ID and status registers, read opcodes only.
+- `testgifs.py OUTDIR`: the big-digit test GIFs used in §9.
+- `swd-pi5.cfg`: OpenOCD on the Pi's GPIO 22/27, `dap info` only, no target.
 - `flashtest.py HUB PORT CAMERA_URL OUTDIR` — the power-cut test in §8: uploads GIFs of set sizes, cuts USB power with `uhubctl`, photographs the panel and re-sends each begin. Every case is one flash write.

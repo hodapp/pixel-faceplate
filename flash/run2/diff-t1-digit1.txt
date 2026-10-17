@@ -1,0 +1,15 @@
+3 of 512 sectors differ
+  0x000000-0x001000 (1 sectors): used before 256 B, after 256 B, 6 bytes changed, bits 0->1 14 (erase), 1->0 8
+    sector 0x000000: 0->1 bits 14
+  0x00a000-0x00b000 (1 sectors): used before 4096 B, after 512 B, 3941 bytes changed, bits 0->1 19326 (erase), 1->0 416
+    sector 0x00a000: 0->1 bits 19326
+  0x03c000-0x03d000 (1 sectors): used before 4096 B, after 512 B, 3941 bytes changed, bits 0->1 19326 (erase), 1->0 416
+    sector 0x03c000: 0->1 bits 19326
+digit1.gif: in A at [], in B at ['0xa000', '0x3c000']
+digit1-looping.gif: in A at [], in B at []
+record byte 0x0c: 88 -> 5c
+record byte 0x0d: 13 -> 01
+record byte 0x10: 39 -> 4d
+record byte 0x11: b1 -> 77
+record byte 0x12: 1d -> 6e
+record byte 0x13: 52 -> d7

@@ -1,0 +1,6 @@
+Open On-Chip Debugger 0.12.0+dev-snapshot (2026-02-16-16:07)
+Info : Linux GPIOD JTAG/SWD bitbang driver
+Info : Note: The adapter "linuxgpiod" doesn't support configurable speed
+Error: Error connecting DP: cannot read IDR
+
+

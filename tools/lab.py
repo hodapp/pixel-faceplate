@@ -12,8 +12,8 @@ Every frame sent and every reply goes to lab-log.jsonl next to this script.
 Guard: only type 0x01/0x02 and command numbers up to 0x21, plus 0xF0, are
 allowed. Anything else could be a firmware update or erase command (see
 PROTOCOL.md, Hidden commands), which could leave the panel fixable only
-through the pads on the board. Those stay refused here; that is a decision
-for Eli, not a flag.
+through the pads on the board. Those stay refused here. Sending one is a
+decision I make on purpose, not something a flag should do.
 """
 
 import json
@@ -40,7 +40,7 @@ def allowed(kind, cmd):
     # only until there is a flash backup: never stream data to a "ready" session.
     if kind == protocol.TYPE_CONTROL and cmd == 0x03:
         return os.environ.get("PROBE_03") == "eli-2026-10-13"
-    # PAST_GUARD=eli-2026-10-13 lifts the guard: Eli accepted the brick risk for
+    # PAST_GUARD=eli-2026-10-13 lifts the guard: I accepted the brick risk for
     # empty-payload probing past 0x21 on 2026-10-13. Don't reuse it for other work.
     if os.environ.get("PAST_GUARD") == "eli-2026-10-13":
         return True

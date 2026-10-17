@@ -1,0 +1,65 @@
+51 of 512 sectors differ
+  0x000000-0x001000 (1 sectors): used before 256 B, after 256 B, 9 bytes changed, bits 0->1 1 (erase), 1->0 28
+    sector 0x000000: 0->1 bits 1
+  0x00a000-0x023000 (25 sectors): used before 57856 B, after 100352 B, 99444 bytes changed, bits 0->1 104586 (erase), 1->0 319489
+    sector 0x00a000: 0->1 bits 1145
+    sector 0x00b000: 0->1 bits 2299
+    sector 0x00c000: 0->1 bits 8620
+    sector 0x00d000: 0->1 bits 8270
+    sector 0x00e000: 0->1 bits 8262
+    sector 0x00f000: 0->1 bits 8558
+    sector 0x010000: 0->1 bits 8480
+    sector 0x011000: 0->1 bits 2960
+    sector 0x012000: 0->1 bits 9189
+    sector 0x013000: 0->1 bits 9164
+    sector 0x014000: 0->1 bits 8851
+    sector 0x015000: 0->1 bits 9083
+    sector 0x016000: 0->1 bits 9330
+    sector 0x017000: 0->1 bits 9344
+    sector 0x018000: 0->1 bits 1031
+    sector 0x019000: 0->1 bits 0
+    sector 0x01a000: 0->1 bits 0
+    sector 0x01b000: 0->1 bits 0
+    sector 0x01c000: 0->1 bits 0
+    sector 0x01d000: 0->1 bits 0
+    sector 0x01e000: 0->1 bits 0
+    sector 0x01f000: 0->1 bits 0
+    sector 0x020000: 0->1 bits 0
+    sector 0x021000: 0->1 bits 0
+    sector 0x022000: 0->1 bits 0
+  0x03c000-0x055000 (25 sectors): used before 57856 B, after 100352 B, 99444 bytes changed, bits 0->1 104586 (erase), 1->0 319489
+    sector 0x03c000: 0->1 bits 1145
+    sector 0x03d000: 0->1 bits 2299
+    sector 0x03e000: 0->1 bits 8620
+    sector 0x03f000: 0->1 bits 8270
+    sector 0x040000: 0->1 bits 8262
+    sector 0x041000: 0->1 bits 8558
+    sector 0x042000: 0->1 bits 8480
+    sector 0x043000: 0->1 bits 2960
+    sector 0x044000: 0->1 bits 9189
+    sector 0x045000: 0->1 bits 9164
+    sector 0x046000: 0->1 bits 8851
+    sector 0x047000: 0->1 bits 9083
+    sector 0x048000: 0->1 bits 9330
+    sector 0x049000: 0->1 bits 9344
+    sector 0x04a000: 0->1 bits 1031
+    sector 0x04b000: 0->1 bits 0
+    sector 0x04c000: 0->1 bits 0
+    sector 0x04d000: 0->1 bits 0
+    sector 0x04e000: 0->1 bits 0
+    sector 0x04f000: 0->1 bits 0
+    sector 0x050000: 0->1 bits 0
+    sector 0x051000: 0->1 bits 0
+    sector 0x052000: 0->1 bits 0
+    sector 0x053000: 0->1 bits 0
+    sector 0x054000: 0->1 bits 0
+digit3.gif: in A at [], in B at ['0xa000', '0x3c000']
+record byte 0x02: 00 -> 01
+record byte 0x08: 01 -> 00
+record byte 0x09: 01 -> 00
+record byte 0x0c: 5c -> 00
+record byte 0x0d: 01 -> 00
+record byte 0x10: 4d -> 00
+record byte 0x11: 77 -> 00
+record byte 0x12: 6e -> 00
+record byte 0x13: d7 -> 00

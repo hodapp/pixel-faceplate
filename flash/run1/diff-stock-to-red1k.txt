@@ -1,0 +1,8 @@
+3 of 512 sectors differ
+  0x000000-0x001000 (1 sectors): used before 256 B, after 256 B, 6 bytes changed, bits 0->1 11 (erase), 1->0 10
+    sector 0x000000: 0->1 bits 11
+  0x00a000-0x00b000 (1 sectors): used before 3840 B, after 1024 B, 3810 bytes changed, bits 0->1 14887 (erase), 1->0 2340
+    sector 0x00a000: 0->1 bits 14887
+  0x03c000-0x03d000 (1 sectors): used before 3840 B, after 1024 B, 3810 bytes changed, bits 0->1 14887 (erase), 1->0 2340
+    sector 0x03c000: 0->1 bits 14887
+red1k.gif: in A at [], in B at ['0xa000', '0x3c000']

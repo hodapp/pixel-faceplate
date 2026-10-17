@@ -1,0 +1,3 @@
+0 of 512 sectors differ
+digit1.gif: in A at [], in B at []
+digit2.gif: in A at ['0xa000'], in B at ['0xa000']

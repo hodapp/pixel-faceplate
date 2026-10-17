@@ -1,0 +1,34 @@
+{
+ "jedec_9F": [
+  "496515",
+  true
+ ],
+ "rems_90": [
+  "4914",
+  true
+ ],
+ "res_AB": [
+  "14",
+  true
+ ],
+ "unique_id_4B": [
+  "0f0034373146504510006200c81a0413",
+  true
+ ],
+ "status1_05": [
+  "00",
+  true
+ ],
+ "status2_35": [
+  "00",
+  true
+ ],
+ "status3_15": [
+  "00",
+  true
+ ],
+ "sfdp_5A_0_256": [
+  "53464450060110ff00060110200000ff49000103600000ffff000104800000ff7a20f1ffffffff0044eb086b083b80bbeeffffffffff00ffffff00ff0c200f5210d800ff649a0d01843015c0656316337a757a75f7bdd55c0096dcffe910c080003650169ef97764fcebffffffffffffffffffffffffffffffffffffffffffff0f0034373146504510006200c81a0413ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  true
+ ]
+}

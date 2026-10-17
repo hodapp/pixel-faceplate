@@ -4,6 +4,26 @@ A Decky plugin for the [JSAUX Pixel Matrix Faceplate](https://jsaux.com/products
 
 ![Graveyard Keeper 2's artwork on the faceplate, next to the game on the TV](docs/in-use.jpg)
 
+## How this went
+
+This started as a fun little plugin. The faceplate showed up one morning, I took it apart, worked out how JSAUX's software talks to it over coffee, and wrote my own Decky plugin so I didn't need theirs. Anything I couldn't do yet I figured was just stuff I hadn't figured out, and it'd all get way easier once JSAUX posted their source like the product page kind of promises ("supports open-source code").
+
+It turned into a rabbit hole of really bizarre hardware choices. The panel saves every picture you send it to flash, there's no command to just draw on it, and JSAUX's own app redraws its clock and stats screens as a brand new picture about once a second. A bright enough picture browns out the USB-A port it ships for. The controller chip has its markings sanded off. There's a command their app never sends that takes a whole data transfer and pops up a "download failed" icon when it times out, which looks a hell of a lot like a firmware loader, while JSAUX says the hardware can't be updated.
+
+And the source? Support told me they're "unable to disclose specific information at this time." Then JSAUX [announced](https://www.reddit.com/r/JSAUX/comments/1x4t6pg/faceplate_app_will_be_opensourced_on_github_after/) the app gets open-sourced once Steam approves it. Just the app, not the firmware or the protocol, and Steam approval has nothing to do with putting code on GitHub.
+
+So I clipped onto the flash chip with a Raspberry Pi and dumped it before and after every command I could send. Honestly I figured it'd be boring, a normal file system and normal flash management. It's worse than that. There's no file system and no wear leveling, just a settings record and the picture rewritten in the same few spots every time, and the chip comes from a maker that never registered its ID, so there's no datasheet saying how many writes it's good for. If it's the usual 100,000, their clock screen gets there in about 28 hours. Then I put pogo pins on every pad I could reach, looking for a debug port to read the firmware out, and nothing answers. Could be a cheap chip that never had one. Could also be locked, which is literally a checkbox when it gets flashed at the factory, and between the sanded markings and how weird they've been about the source I'd say that one's very much on the table.
+
+Everything I found is in this repo, with the raw data, so you don't have to take my word for any of it:
+
+- [PROTOCOL.md](PROTOCOL.md): the serial protocol, every command, the board, and what writes the flash.
+- [flash/](flash/README.md): every flash dump (stock backup included), diff reports, chip ID, the scripts and how to repeat the whole thing on a Pi.
+- [flash/SWD.md](flash/SWD.md): the debug port hunt, pad by pad, with the raw logs.
+- [docs/WRITEUP.md](docs/WRITEUP.md): the long story of figuring out the protocol, with photos.
+- [docs/VENDOR-SOFTWARE.md](docs/VENDOR-SOFTWARE.md): what JSAUX's own software actually does.
+
+The rest of this page is the plugin, which only sends the panel something when it actually has to.
+
 > **Use at your own risk.** I put this together over coffee one morning, poking at the faceplate, and it has only been tested on my own Steam Machine, doing what I do with it. You're welcome to install it and use it, but I don't consider it ready for wide distribution and I'm not submitting it to the Decky store. I'm old as dirt and was a software engineer in a past life. These days I do this for fun, including a lot of custom ESP32 firmware for smart home stuff around my house, so I think it's in decent shape. I'm mostly sharing it so the next person who wants to do cool stuff with this panel doesn't have to start from scratch. Still, it talks directly to hardware that stores everything in flash and can brown out a USB port. You've been warned.
 
 > **This is most likely the last version.** I'm still working on the hardware side, but anything new will go to [GabeCubeAura](https://github.com/Alyenax/GabeCubeAura) as pull requests instead of into this plugin. Updating this one by hand is a pain, and GabeCubeAura seems like a better home for it. Whether GabeCubeAura takes faceplate support is up to its author. If it does, this plugin steps aside on its own (0.2.1 or newer) and you can uninstall it. Until then, update this one or leave it as it is, whichever you like.
@@ -27,7 +47,7 @@ New to Decky, or not sure? Use the [step-by-step guide](#install-step-by-step) b
 
 ### Before you start
 
-- Every picture you send gets saved to the panel's flash memory, which wears out with use, so the plugin only sends a picture when it actually changes. See [Flash wear](#flash-wear).
+- Every picture you send gets saved to the panel's flash memory, always to the same spot, and flash wears out with use. The plugin only sends a picture when it actually changes. See [Flash wear](#flash-wear).
 - A very bright picture at full brightness can draw more than a USB-A port supplies, and the panel then browns out. The plugin turns brightness down for those pictures to stay under the limit I measured. See [Power](#power-usb-a-versus-usb-c).
 
 ## Install, step by step
@@ -126,19 +146,29 @@ It works by listening for the system's own sleep and shutdown announcements, and
 
 ## Flash wear
 
-The panel stores whatever you send it and shows it again after a power cut. That's on purpose: the faceplate keeps working with the Steam Machine off or with no software running. The catch is that every picture is a write to flash memory. I timed it: the panel takes about 80 ms longer to confirm for every extra 4 KB of picture, no matter how many frames the GIF has, which is what erasing and rewriting flash looks like.
+The panel stores whatever you send it and shows it again after a power cut. That's on purpose: the faceplate keeps working with the Steam Machine off or with no software running. The catch is that every picture is a write to flash memory, and I've now read the chip directly to see exactly what that means.
 
-The chip on the board is a 25Q016B, an ordinary 2 MB SPI flash. Chips like that are typically rated for around 100,000 erases per 4 KB sector. Whether that budget matters depends on how the firmware spreads its writes, and there's no way to see that from outside.
+The chip is U22, a CIU25Q016B, 2 MB of SPI flash. Every new picture erases the settings sector at the start of the chip and the same sectors for the picture itself, at the same addresses every time, twice over (it lands in a buffer first and gets copied once its CRC checks out). Changing the brightness rewrites the settings sector. So does picking one of the panel's built-in animations, and that also makes it forget the picture it had, so going back to it is a full write again. Nothing spreads the wear around. Screen off and on, booting, and sending a picture it already has cost nothing.
 
-JSAUX has said that still images don't write flash and that only GIFs over 20 KB do. I tested that by cutting the panel's power after uploads from 1 KB to 30 KB, still and animated. Every one of them came back when the power did, so every upload is a flash write, whatever its size. The numbers are in [PROTOCOL.md](PROTOCOL.md).
+Chips like this are typically rated for around 100,000 erases per sector. I couldn't find a datasheet for this one, so that's an assumption, and real chips usually outlast their rating. At 100k:
+
+| What's uploading | How often | Rated life of those sectors |
+|---|---|---|
+| JSAUX's app on its clock, stats, playtime or timer screens | about once a second | about 28 hours |
+| a clock that redraws once a minute | once a minute | about 69 days |
+| this plugin on game artwork | once per game launch | decades |
+
+JSAUX has also said that still images don't write flash and that only GIFs over 20 KB do. Neither is true. I cut the panel's power after uploads from 1 KB to 30 KB, still and animated, and every one came back, and the dumps show a 348 byte still picture getting written like any other. The dumps, the diffs and how to repeat it are in [flash/](flash/README.md), and the short version is in [PROTOCOL.md](PROTOCOL.md#9-flash-layout-and-what-writes-it-seen).
 
 So the plugin is careful with writes:
 
 - It only sends a picture when it's different from the last one, never more than once a second.
 - If the panel already holds the exact same picture it says so, and nothing gets written.
 - Artwork costs one write per game, the clock one per minute, and the aura usually a few per hour.
+- Brightness only goes out when it actually changes. Every change is a write though, so don't sit there sliding it back and forth. A bright picture that has to be turned down costs a brightness write on the way in and another when the next picture goes back up.
+- Turning the screen off for sleep costs nothing. "Dim" costs up to two writes per sleep, one to dim and one to put it back.
 
-There's no screen mirroring mode for this reason. Mirroring a game at 2 frames per second would use 100,000 writes in about 14 hours if the firmware rewrites the same spot each time.
+There's no screen mirroring mode for this reason. Mirroring a game at 2 frames per second would burn through 100,000 writes on those sectors in about 14 hours.
 
 ## Power: USB-A versus USB-C
 
@@ -158,7 +188,7 @@ I measured the limit on USB-A with solid white: brightness 40, 50 and 60 each he
 
 ## How it works
 
-The short version: the panel is a CH340 USB serial device at 1,000,000 baud. Messages start with "DY", carry a command and a CRC, and pictures go up as GIFs in 498-byte chunks. [PROTOCOL.md](PROTOCOL.md) has every command, timing and what's on the board; [docs/WRITEUP.md](docs/WRITEUP.md) is the story of figuring it out, with photos, and [docs/VENDOR-SOFTWARE.md](docs/VENDOR-SOFTWARE.md) sums up what JSAUX's own software does.
+The short version: the panel is a CH340 USB serial device at 1,000,000 baud. Messages start with "DY", carry a command and a CRC, and pictures go up as GIFs in 498-byte chunks. [PROTOCOL.md](PROTOCOL.md) has every command, timing, what's on the board and what lands in flash. The rest of the docs are listed under [How this went](#how-this-went).
 
 SteamOS doesn't have Pillow or pyserial, so the plugin has its own small GIF encoder, opens the serial port with `termios`, and decodes artwork with GStreamer.
 
@@ -173,7 +203,7 @@ pnpm test         # Python tests (the GIF round-trip tests also want Pillow)
 pnpm package      # out/Pixel-Faceplate-v<version>.zip
 ```
 
-`tools/` holds the scripts used to work out the protocol: `probe.py` (send commands by hand), `scan.py`, `sizetime.py`, `steptest.py`, `rescue.py`, `bootprobe.py` (looks for a bootloader, and turns factory test mode off), and the `lab*.py` bench tools (`lab_camfuzz.py` watches the panel with a camera while it sends commands). Read their headers before running them. A few of them write to the panel's flash or push it towards its power limit on purpose.
+`tools/` holds the scripts used to work out the protocol: `probe.py` (send commands by hand), `scan.py`, `sizetime.py`, `steptest.py`, `rescue.py`, `bootprobe.py` (looks for a bootloader, and turns factory test mode off), the `lab*.py` bench tools (`lab_camfuzz.py` watches the panel with a camera while it sends commands), and the flash and SWD tools that run on a Raspberry Pi (`u22.sh`, `flashdiff.py`, `chipid.py`, `testgifs.py`, `swd-pi5.cfg`, see [flash/](flash/README.md#how-to-repeat-it)). Read their headers before running them. A few of them write to the panel's flash or push it towards its power limit on purpose.
 
 ## Thanks, GabeCubeAura
 
