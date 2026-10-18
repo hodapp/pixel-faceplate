@@ -6,7 +6,7 @@ import os
 import threading
 import time
 
-from . import gif, protocol, render
+from . import cats, gif, protocol, render
 from .settings import for_game, parse_color
 from .transport import Link, LinkBusy, LinkError, find_port
 
@@ -37,6 +37,8 @@ ARTWORK_POLL = 5.0
 # How long sleep/shutdown handling waits for an upload or decode in progress.
 # logind's default InhibitDelayMaxSec is 5 s, so this stays well under it.
 POWER_LOCK_WAIT = 3.0
+# When no cat could be had (offline with an empty stash), try again this much later.
+CAT_RETRY = 60.0
 
 
 def frame_load(rgb):
@@ -120,6 +122,11 @@ class FaceplateService:
         self._on_owner_change = on_owner_change or (lambda owner: None)
         self.handed_to = ""
         self._owner_checked = 0.0
+        # Between-games cats: the one on show and when the next one is due.
+        self.cats = cats.CatStash()
+        self.cat_frame = None
+        self.cat_due = 0.0
+        self.cat_shown_at = 0.0
 
     # ---- lifecycle -----------------------------------------------------
     def start(self):
@@ -152,13 +159,20 @@ class FaceplateService:
             if any(old.get(k) != self.cfg.get(k) for k in redraw):
                 self.last_hash = None
                 self.last_aura = None
+            if old.get("cat_interval") != self.cfg.get("cat_interval") and self.cat_frame is not None:
+                self.cat_due = self.cat_shown_at + self.cfg["cat_interval"] * 60
             if old.get("brightness") != self.cfg.get("brightness"):
                 self.applied_brightness = None
         self.wake.set()
 
+    def next_cat(self):
+        """Show a different cat now (the panel's "Next cat" button)."""
+        self.cat_due = 0.0
+        self.wake.set()
+
     def game_event(self, appid, running):
         """Steam said a game started or stopped; redraw now instead of at the next poll."""
-        appid = int(appid or 0)
+        appid = render.normalize_appid(appid)
         if running and appid:
             self.reported_app = appid
         elif not appid or appid == self.reported_app:
@@ -338,23 +352,40 @@ class FaceplateService:
         if mode == "artwork":
             # Steam's own launch/exit event (from the frontend) is instant; the
             # /proc check covers a client where that event never arrives.
-            self.appid = self.reported_app or render.running_appid()
+            appid = self.appid = self.reported_app or render.running_appid()
             rgb = self._artwork_frame(self.appid, for_game(cfg, self.appid))
             if rgb is None:
-                # Nothing running (or no art cached for this game).
+                # Nothing running (or no art found for this game).
                 idle = cfg["artwork_idle"]
+                missing = "no artwork found for app %d" % appid if appid else ""
+                if idle == "cats":
+                    now = time.monotonic()
+                    if self.cat_frame is None or now >= self.cat_due:
+                        frame = self.cats.next_frame()
+                        if frame is not None:
+                            self.cat_frame = frame
+                            self.cat_shown_at = now
+                            self.cat_due = now + cfg["cat_interval"] * 60
+                        else:
+                            self.cat_due = now + CAT_RETRY
+                    if self.cat_frame is not None:
+                        self._upload(self.cat_frame)
+                        self._set("running", missing or "no game running, showing a cat (from %s)" % (
+                            self.cats.source or "earlier"))
+                        return max(1.0, min(ARTWORK_POLL, self.cat_due - time.monotonic()))
+                    idle = "steam"  # no cat to be had yet
                 if idle == "steam":
                     logo = self._steam_logo()
                     if logo is not None:
                         self._upload(logo)
-                        self._set("running", "no game running, showing the Steam logo")
+                        self._set("running", missing or "no game running, showing the Steam logo")
                         return ARTWORK_POLL
                     idle = "keep"  # no icon on this system
                 if idle == "clock":
                     self._upload(self._clock_frame(cfg))
-                    self._set("running", "no game running, showing the clock")
+                    self._set("running", missing or "no game running, showing the clock")
                     return min(ARTWORK_POLL, self._until_next_minute())
-                self._set("running", "no game running, keeping the last picture")
+                self._set("running", missing or "no game running, keeping the last picture")
                 return ARTWORK_POLL
             self._upload(rgb)
             self._set("running", "artwork for app %d" % self.appid)
