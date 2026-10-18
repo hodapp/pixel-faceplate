@@ -25,8 +25,10 @@ import {
   Status,
   gameEvent,
   getStatus,
+  nextCat,
   saveGameSettings,
   saveSettings,
+  writeDiagnostics,
 } from "./api";
 
 const POLL_MS = 1000;
@@ -51,6 +53,7 @@ const IDLE_CHOICES: { data: IdleChoice; label: string }[] = [
   { data: "steam", label: "Steam logo" },
   { data: "clock", label: "Clock" },
   { data: "keep", label: "Keep the last game's picture" },
+  { data: "cats", label: "Random cats" },
 ];
 
 const ART_STYLES: { data: ArtStyle; label: string }[] = [
@@ -64,6 +67,13 @@ const LOGO_POSITIONS: { data: LogoPosition; label: string }[] = [
   { data: "top", label: "Top" },
   { data: "center", label: "Center" },
   { data: "bottom", label: "Bottom" },
+];
+
+const CAT_INTERVALS = [
+  { data: 1, label: "Every minute" },
+  { data: 3, label: "Every 3 minutes" },
+  { data: 5, label: "Every 5 minutes" },
+  { data: 10, label: "Every 10 minutes" },
 ];
 
 const COLORS = [
@@ -80,6 +90,7 @@ function Content() {
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
   const [brightness, setBrightness] = useState<number | null>(null);
+  const [diagnostics, setDiagnostics] = useState("");
   const brightnessTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -251,6 +262,24 @@ function Content() {
                 onChange={(option) => save({ artwork_idle: option.data as IdleChoice })}
               />
             </PanelSectionRow>
+            {s.artwork_idle === "cats" && (
+              <>
+                <PanelSectionRow>
+                  <DropdownItem
+                    label="New cat"
+                    description="Each new cat is a flash write; with no network, cats you've already seen come back"
+                    rgOptions={CAT_INTERVALS}
+                    selectedOption={s.cat_interval}
+                    onChange={(option) => save({ cat_interval: option.data as number })}
+                  />
+                </PanelSectionRow>
+                <PanelSectionRow>
+                  <ButtonItem layout="below" onClick={() => nextCat().catch((e) => setError(String(e)))}>
+                    Next cat
+                  </ButtonItem>
+                </PanelSectionRow>
+              </>
+            )}
           </>
         )}
 
@@ -347,6 +376,23 @@ function Content() {
             {status.uploads} / {status.lifetime_uploads}
           </Field>
         </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            description={diagnostics || "Run it while a game is running; it writes a report file to your home folder"}
+            onClick={async () => {
+              setDiagnostics("Writing report (takes a couple of seconds)...");
+              try {
+                const result = await writeDiagnostics(frontendSnapshot());
+                setDiagnostics(result.ok ? `${result.summary} Saved to ${result.path}` : `Failed: ${result.error}`);
+              } catch (e) {
+                setDiagnostics(`Failed: ${String(e)}`);
+              }
+            }}
+          >
+            Write diagnostics report
+          </ButtonItem>
+        </PanelSectionRow>
         {(error || pollError || status.last_error) && (
           <PanelSectionRow>
             <Field label="Error" description={error || pollError || status.last_error} focusable={false} />
@@ -375,19 +421,91 @@ interface LifetimeEvent {
   bRunning?: boolean;
 }
 
+// How often the running game is re-read from Steam's UI store (JS only, no panel traffic).
+const RUNNING_POLL_MS = 2000;
+
+// Steam's own idea of the game in front: also right for non-Steam games
+// (shortcuts), whose launch events don't always carry a usable app ID.
+function runningAppId(): number {
+  try {
+    const store = (window as unknown as {
+      SteamUIStore?: { MainRunningApp?: { appid?: number | string } | null };
+    }).SteamUIStore;
+    const id = Number(store?.MainRunningApp?.appid);
+    return Number.isFinite(id) && id > 0 ? id >>> 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// The last few launch/exit events, for the diagnostics report.
+const recentEvents: { at: string; appid: number; running: boolean; from: string }[] = [];
+
+function logEvent(appid: number, running: boolean, from: string) {
+  recentEvents.push({ at: new Date().toISOString(), appid, running, from });
+  if (recentEvents.length > 10) recentEvents.shift();
+}
+
+function frontendSnapshot(): Record<string, unknown> {
+  let app: Record<string, unknown> = {};
+  try {
+    const main = (window as unknown as { SteamUIStore?: { MainRunningApp?: Record<string, unknown> | null } })
+      .SteamUIStore?.MainRunningApp;
+    if (main) {
+      for (const key of ["appid", "gameid", "display_name", "app_type", "local_per_client_data"]) {
+        const value = main[key];
+        app[key] = typeof value === "object" ? String(value) : value;
+      }
+    } else {
+      app = { none: true };
+    }
+  } catch (e) {
+    app = { error: String(e) };
+  }
+  return { main_running_appid: runningAppId(), main_running_app: app, recent_events: recentEvents };
+}
+
 function watchGames(): () => void {
+  let registration: { unregister?: () => void } | undefined;
   try {
     const sessions = (window as unknown as {
       SteamClient?: { GameSessions?: { RegisterForAppLifetimeNotifications?: (cb: (e: LifetimeEvent) => void) => { unregister?: () => void } } };
     }).SteamClient?.GameSessions;
-    const registration = sessions?.RegisterForAppLifetimeNotifications?.((event) => {
+    registration = sessions?.RegisterForAppLifetimeNotifications?.((event) => {
       const appid = Number(event?.unAppID) >>> 0;
+      logEvent(appid, Boolean(event?.bRunning), "lifetime event");
       if (appid) gameEvent(appid, Boolean(event?.bRunning)).catch(() => undefined);
+      if (event?.bRunning) {
+        // If the event's ID isn't the one Steam's UI settles on (with
+        // shortcuts, possibly), Steam's wins once it's there.
+        window.setTimeout(() => {
+          const settled = runningAppId();
+          if (settled && settled !== appid) gameEvent(settled, true).catch(() => undefined);
+        }, RUNNING_POLL_MS);
+      }
     });
-    return () => registration?.unregister?.();
   } catch {
-    return () => undefined;
+    registration = undefined;
   }
+  // Report changes in Steam's running game too; this is what catches shortcuts.
+  let last = runningAppId();
+  if (last) gameEvent(last, true).catch(() => undefined);
+  const timer = window.setInterval(() => {
+    const now = runningAppId();
+    if (now === last) return;
+    logEvent(now, Boolean(now), "SteamUIStore");
+    if (last) gameEvent(last, false).catch(() => undefined);
+    if (now) gameEvent(now, true).catch(() => undefined);
+    last = now;
+  }, RUNNING_POLL_MS);
+  return () => {
+    window.clearInterval(timer);
+    try {
+      registration?.unregister?.();
+    } catch {
+      // Steam already dropped it
+    }
+  };
 }
 
 export default definePlugin(() => {

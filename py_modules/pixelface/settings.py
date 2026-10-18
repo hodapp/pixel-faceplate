@@ -10,8 +10,10 @@ DEFAULTS = {
     "mode": "off",
     "brightness": 60,
     # Artwork mode with no game running: the Steam logo (one write per game
-    # exit), the clock (a write a minute) or keep the last game's picture.
+    # exit), the clock (a write a minute), keep the last game's picture, or a
+    # random cat photo, a new one every cat_interval minutes.
     "artwork_idle": "steam",
+    "cat_interval": 10,
     # How a game's art is drawn: logo_dim (logo over a darkened band, so the
     # title reads on busy art), logo (no band), art (no logo) or logo_only.
     "art_style": "logo_dim",
@@ -36,7 +38,7 @@ DEFAULTS = {
 }
 
 SLEEP_ACTIONS = ("off", "dim", "keep")
-IDLE_CHOICES = ("steam", "clock", "keep")
+IDLE_CHOICES = ("steam", "clock", "keep", "cats")
 ART_STYLES = ("logo_dim", "logo", "art", "logo_only")
 LOGO_POSITIONS = ("bottom", "center", "top")
 GAME_KEYS = ("art_style", "logo_position")
@@ -89,6 +91,8 @@ def validate(changes):
             out[key] = bool(value)
         elif key == "brightness":
             out[key] = _int(value, "brightness", 0, 100)
+        elif key == "cat_interval":
+            out[key] = _int(value, "cat interval", 1, 1440)
         elif key == "aura_interval":
             out[key] = _int(value, "aura interval", 30, 600)
         elif key == "clock_color":

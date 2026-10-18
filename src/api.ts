@@ -3,7 +3,7 @@ import { callable } from "@decky/api";
 
 export type Mode = "off" | "artwork" | "clock" | "aura" | "image";
 export type SleepAction = "off" | "dim" | "keep";
-export type IdleChoice = "steam" | "clock" | "keep";
+export type IdleChoice = "steam" | "clock" | "keep" | "cats";
 export type ArtStyle = "logo_dim" | "logo" | "art" | "logo_only";
 export type LogoPosition = "bottom" | "center" | "top";
 
@@ -20,6 +20,7 @@ export interface Settings {
   sleep_action: SleepAction;
   shutdown_action: SleepAction;
   rotate: boolean;
+  cat_interval: number;
   game_profiles: Record<string, GameProfile>;
 }
 
@@ -57,3 +58,15 @@ export const saveSettings = callable<[changes: Partial<Settings>], SaveResult>("
 export const saveGameSettings = callable<[appid: number, changes: Partial<GameProfile> | null], SaveResult>(
   "save_game_settings",
 );
+
+export const nextCat = callable<[], boolean>("next_cat");
+
+export interface DiagnosticsResult {
+  ok: boolean;
+  path: string;
+  summary: string;
+  error: string;
+}
+
+// What Steam's UI knows about the running game, passed along into the report.
+export const writeDiagnostics = callable<[frontend: Record<string, unknown>], DiagnosticsResult>("write_diagnostics");

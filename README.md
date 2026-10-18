@@ -114,7 +114,9 @@ Quick Access menu > Decky > gear > Plugins, find Pixel Faceplate, and uninstall 
 ## Modes
 
 - Off: Leaves the panel alone and lets go of the serial port. The panel keeps showing whatever it last stored.
-- Game artwork: When you launch a game, the panel shows the game's wide hero art with its logo over the bottom. The logo is pushed to full brightness over a slightly darker band, and the art's midtones are lifted, because even at maximum the panel is much dimmer than the Steam Machine's light bar. It finds the running game and its art the same way [GabeCubeAura](#thanks-gabecubeaura) does, so your SteamGridDB custom art is used if you have it. Between games it shows the Steam logo (drawn from the icon SteamOS already has), the clock, or the last game's picture, whichever you pick.
+- Game artwork: When you launch a game, the panel shows the game's wide hero art with its logo over the bottom. The logo is pushed to full brightness over a slightly darker band, and the art's midtones are lifted, because even at maximum the panel is much dimmer than the Steam Machine's light bar. It finds the running game and its art the same way [GabeCubeAura](#thanks-gabecubeaura) does, so your SteamGridDB custom art is used if you have it. That includes non-Steam games you've added to Steam, which only have the art SteamGridDB put in the grid folder. A Steam game whose art isn't in the local library cache (some games that start through a launcher) gets it from Steam's CDN once, kept in the plugin's folder. Between games it shows the Steam logo (drawn from the icon SteamOS already has), the clock, the last game's picture, or random cats, whichever you pick.
+
+  Random cats are photos from [TheCatAPI](https://thecatapi.com), with [CATAAS](https://cataas.com) as a backup, cropped to fit. A new one comes every 1, 3, 5 or 10 minutes (10 by default), and there's a Next cat button. The last 40 are kept, so with no network you get cats you've already seen, and with none at all the Steam logo.
 
   Artwork style picks how the game is drawn:
   - Art + logo, shaded behind logo: the art darkens toward the logo so the title reads on busy art. This is the default.
@@ -164,7 +166,7 @@ So the plugin is careful with writes:
 
 - It only sends a picture when it's different from the last one, never more than once a second.
 - If the panel already holds the exact same picture it says so, and nothing gets written.
-- Artwork costs one write per game, the clock one per minute, and the aura usually a few per hour.
+- Artwork costs one write per game, the clock one per minute, random cats one per new cat (so one a minute at the fastest setting, the same as the clock), and the aura usually a few per hour.
 - Brightness only goes out when it actually changes. Every change is a write though, so don't sit there sliding it back and forth. A bright picture that has to be turned down costs a brightness write on the way in and another when the next picture goes back up.
 - Turning the screen off for sleep costs nothing. "Dim" costs up to two writes per sleep, one to dim and one to put it back.
 
@@ -184,6 +186,7 @@ I measured the limit on USB-A with solid white: brightness 40, 50 and 60 each he
 - If the panel keeps restarting, flashing or showing glitchy lines, it's probably starting up into a picture that's too bright for the port. Copy this repo's `tools` and `py_modules` folders to the Steam Machine, run `python3 tools/rescue.py` from that folder, then plug the panel into the USB-C port. The script turns the screen off the moment the panel appears, stores a black picture and turns the screen back on. After that it's safe to go back to USB-A.
 - If the status says the faceplate is in use by another app, something else is driving it, usually GabeCubeAura's faceplate support. Only one can have it at a time; turn one of them off and the other picks it up within a few seconds.
 - If the panel cycles through red, green, blue and white with scanning lines, it's in its factory test mode (holding the L pad on the board to ground at power-up starts it, and it stays on across restarts). From this repo's folder, run `python3 tools/bootprobe.py /dev/ttyUSB0 testoff` with the plugin set to Off. The test pattern includes full white, so if the panel keeps restarting on USB-A, do this on the USB-C port.
+- If a game's art doesn't show up, start the game, then press Write diagnostics report in the Status section. It writes `~/pixel-faceplate-diagnostics.txt`: which app ID the plugin got and from where (Steam's UI, launch events, `/proc`), the accounts in `loginusers.vdf`, and which folders it looked in for art.
 - The plugin logs to Decky's log: `journalctl -u plugin_loader | grep "Pixel Faceplate"`
 
 ## How it works

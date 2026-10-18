@@ -5,7 +5,9 @@ import os
 import re
 import shutil
 import subprocess
+import ssl
 import time
+import urllib.request
 
 from .protocol import HEIGHT, WIDTH
 
@@ -392,24 +394,61 @@ def _usable(path):
 
 
 def _active_grid_dir(root):
-    """config/grid of the most recent login only, never another account's overrides."""
+    """config/grid of the logged-in account only, never another account's overrides.
+
+    That's the login marked MostRecent in loginusers.vdf; some installs don't
+    write that flag, so then the newest Timestamp, or the only account there is.
+    """
     try:
         with open(os.path.join(root, "config", "loginusers.vdf"), encoding="utf-8") as handle:
             content = handle.read()
     except OSError:
-        return None
+        content = ""
+    accounts = []
     for match in re.finditer(r'"(\d{16,20})"\s*\{([^{}]*)\}', content):
-        if re.search(r'"MostRecent"\s*"1"', match.group(2), re.IGNORECASE):
-            grid = os.path.join(root, "userdata", str(int(match.group(1)) & 0xFFFFFFFF), "config", "grid")
-            return grid if os.path.isdir(grid) else None
-    return None
+        recent = re.search(r'"MostRecent"\s*"1"', match.group(2), re.IGNORECASE)
+        stamp = re.search(r'"Timestamp"\s*"(\d+)"', match.group(2), re.IGNORECASE)
+        accounts.append((1 if recent else 0, int(stamp.group(1)) if stamp else 0, int(match.group(1)) & 0xFFFFFFFF))
+    if accounts:
+        account = max(accounts)[2]
+    else:
+        found = glob.glob(os.path.join(root, "userdata", "*", "config", "grid"))
+        if len(found) != 1:
+            return None
+        return found[0]
+    grid = os.path.join(root, "userdata", str(account), "config", "grid")
+    return grid if os.path.isdir(grid) else None
+
+
+def grid_dirs(root, appid):
+    """Grid folders to look in: the logged-in account's, then (shortcuts only) every other account's.
+
+    A Steam game's custom art belongs to whoever is logged in. A non-Steam
+    game's ID is already per account, so if the active account can't be
+    told from loginusers.vdf, any account's grid art for it is the right one.
+    """
+    active = _active_grid_dir(root)
+    dirs = [active] if active else []
+    if appid & SHORTCUT_BIT:
+        others = glob.glob(os.path.join(root, "userdata", "*", "config", "grid"))
+        try:
+            others.sort(key=os.path.getmtime, reverse=True)
+        except OSError:
+            pass
+        dirs += [d for d in others if d != active]
+    return dirs
 
 
 def find_art(appid, kind, root=STEAM_ROOT):
-    """Path of a game's art of one kind (hero, header, capsule, logo), or None."""
-    appid = int(appid)
-    grid = _active_grid_dir(root)
-    if grid:
+    """Path of a game's art of one kind (hero, header, capsule, logo), or None.
+
+    Non-Steam games only have art in the grid folder (where SteamGridDB puts
+    it); Steam's library cache holds nothing for them.
+    """
+    appid = normalize_appid(appid)
+    if not appid:
+        return None
+    for grid in grid_dirs(root, appid):
         for ext in IMAGE_EXTENSIONS:
             path = os.path.join(grid, "%d%s.%s" % (appid & 0xFFFFFFFF, GRID_SUFFIX[kind], ext))
             if _usable(path):
@@ -420,14 +459,141 @@ def find_art(appid, kind, root=STEAM_ROOT):
             name = "%s.%s" % (stem, ext)
             for path in ([os.path.join(cache, str(appid), name)]
                          + sorted(glob.glob(os.path.join(cache, str(appid), "*", name)))
+                         + sorted(glob.glob(os.path.join(cache, str(appid), "**", name), recursive=True))
                          + [os.path.join(cache, "%d_%s" % (appid, name))]):
                 if _usable(path):
                     return path
+    return downloaded_art(appid, kind)
+
+
+# Steam games whose art isn't in the local library cache (it only holds what
+# the library has drawn lately, and some games, like ones with a launcher in
+# front, can be missing pieces) get it from Steam's public CDN once, kept in
+# the plugin's own folder. Non-Steam games have no CDN art: SteamGridDB only.
+ART_DOWNLOAD_DIR = None  # set by main.py; None turns downloading off
+CDN_HOSTS = (
+    "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/%d/%s",
+    "https://cdn.cloudflare.steamstatic.com/steam/apps/%d/%s",
+)
+CDN_NAMES = {
+    "hero": ("library_hero.jpg",),
+    "logo": ("logo.png",),
+    "capsule": ("library_600x900.jpg",),
+    "header": ("header.jpg",),
+}
+# A miss is remembered this long before asking the CDN again.
+CDN_RETRY = 24 * 3600
+CDN_TIMEOUT = 4.0
+SHORTCUT_BIT = 0x80000000
+
+
+def _looks_like_image(data):
+    return data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def downloaded_art(appid, kind, directory=None, fetch=None):
+    """Path of art fetched from Steam's CDN (fetching it now if needed), or None."""
+    directory = directory or ART_DOWNLOAD_DIR
+    if not directory or not appid or appid & SHORTCUT_BIT or kind not in CDN_NAMES:
+        return None
+    base = os.path.join(directory, "%d_%s" % (appid, kind))
+    for ext in ("jpg", "png"):
+        if _usable("%s.%s" % (base, ext)):
+            return "%s.%s" % (base, ext)
+    missing = base + ".missing"
+    try:
+        if time.time() - os.path.getmtime(missing) < CDN_RETRY:
+            return None
+    except OSError:
+        pass
+    fetch = fetch or _fetch
+    for name in CDN_NAMES[kind]:
+        for host in CDN_HOSTS:
+            data = fetch(host % (appid, name))
+            if data and len(data) <= MAX_ART_BYTES and _looks_like_image(data):
+                path = "%s.%s" % (base, "png" if data[:4] == b"\x89PNG" else "jpg")
+                try:
+                    os.makedirs(directory, exist_ok=True)
+                    with open(path + ".tmp", "wb") as handle:
+                        handle.write(data)
+                    os.replace(path + ".tmp", path)
+                except OSError:
+                    return None
+                return path
+    try:
+        os.makedirs(directory, exist_ok=True)
+        with open(missing, "w"):
+            pass
+    except OSError:
+        pass
     return None
 
 
+# Decky's bundled Python may not find the system's certificates on its own.
+SYSTEM_CA_FILES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/ca-certificates/extracted/tls-ca-bundle.pem")
+
+
+def _ssl_context():
+    for path in SYSTEM_CA_FILES:
+        if os.path.isfile(path):
+            try:
+                return ssl.create_default_context(cafile=path)
+            except (OSError, ssl.SSLError):
+                continue
+    return ssl.create_default_context()
+
+
+def _fetch(url):
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "pixel-faceplate"})
+        with urllib.request.urlopen(request, timeout=CDN_TIMEOUT, context=_ssl_context()) as response:
+            if response.status != 200:
+                return None
+            return response.read(MAX_ART_BYTES + 1)
+    except (OSError, ValueError):
+        return None
+
+
+def normalize_appid(value):
+    """A Steam app ID as the 32-bit number Steam's grid and cache files use.
+
+    Non-Steam games (shortcuts) have a 32-bit app ID with the top bit set,
+    and Steam also refers to them by a 64-bit game ID, (appid << 32) |
+    0x02000000. Both come out as the 32-bit app ID; anything unusable is 0.
+    """
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return 0
+    if value <= 0:
+        return 0
+    if value > 0xFFFFFFFF:
+        return (value >> 32) & 0xFFFFFFFF
+    return value
+
+
+def _launch_env_appid(proc_root, pid):
+    """App ID from a launch's environment, for launches whose AppId= is 0 or missing."""
+    try:
+        with open(os.path.join(proc_root, pid, "environ"), "rb") as handle:
+            env = handle.read(65536).split(b"\0")
+    except OSError:
+        return 0
+    found = {}
+    for item in env:
+        key, _, value = item.partition(b"=")
+        if key in (b"SteamGameId", b"SteamOverlayGameId", b"SteamAppId"):
+            found[key] = normalize_appid(value)
+    # SteamGameId carries the shortcut's 64-bit game ID; SteamAppId is 0 for shortcuts.
+    return found.get(b"SteamGameId") or found.get(b"SteamOverlayGameId") or found.get(b"SteamAppId") or 0
+
+
 def running_appid(proc_root="/proc"):
-    """App ID of the game Steam is running, from its `reaper SteamLaunch AppId=N` process (0 if none)."""
+    """App ID of the game Steam is running, from its `reaper SteamLaunch AppId=N` process (0 if none).
+
+    Non-Steam games launch through the same reaper; when their AppId= is 0
+    or missing, the launch's SteamGameId environment variable names them.
+    """
     best = (0, 0)
     try:
         entries = os.listdir(proc_root)
@@ -443,16 +609,16 @@ def running_appid(proc_root="/proc"):
             continue
         if b"SteamLaunch" not in args:
             continue
+        appid = 0
         for arg in args:
             if arg.startswith(b"AppId="):
-                try:
-                    appid = int(arg[6:])
-                except ValueError:
-                    break
-                # Newest launch wins if two are up (e.g. a game started from another).
-                if appid and int(entry) > best[0]:
-                    best = (int(entry), appid)
+                appid = normalize_appid(arg[6:])
                 break
+        if not appid:
+            appid = _launch_env_appid(proc_root, entry)
+        # Newest launch wins if two are up (e.g. a game started from another).
+        if appid and int(entry) > best[0]:
+            best = (int(entry), appid)
     return best[1]
 
 

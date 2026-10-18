@@ -1,5 +1,6 @@
 # Decky backend entry point: settings, the faceplate worker, frontend callables.
 
+import asyncio
 import os
 import sys
 
@@ -10,6 +11,7 @@ import decky
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_modules"))
 
 from pixelface import __version__  # noqa: E402
+from pixelface import cats, diag, render  # noqa: E402
 from pixelface.handoff import faceplate_owner  # noqa: E402
 from pixelface.power_events import PowerEvents  # noqa: E402
 from pixelface.service import FaceplateService  # noqa: E402
@@ -23,6 +25,11 @@ class Plugin:
         if self.settings.load_error:
             decky.logger.warning("[Pixel Faceplate] " + self.settings.load_error)
         counter = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "writes.json")
+        # Art fetched from Steam's CDN for games the local library cache lacks.
+        runtime = getattr(decky, "DECKY_PLUGIN_RUNTIME_DIR", decky.DECKY_PLUGIN_SETTINGS_DIR)
+        render.ART_DOWNLOAD_DIR = os.path.join(runtime, "art")
+        # Cat photos for between games, with a stash for when there's no network.
+        cats.CATS_DIR = os.path.join(runtime, "cats")
         plugins_dir = os.path.dirname(decky.DECKY_PLUGIN_DIR)
         self.power = PowerEvents(self.service_power_event, decky.logger)
         self.service = FaceplateService(
@@ -84,3 +91,17 @@ class Plugin:
             return {"ok": False, "error": "could not save: %s" % error, "status": self.service.status()}
         self.service.configure(values)
         return {"ok": True, "error": "", "status": self.service.status()}
+
+    async def next_cat(self):
+        self.service.next_cat()
+        return True
+
+    async def write_diagnostics(self, frontend: dict = None):
+        """Write ~/pixel-faceplate-diagnostics.txt; returns {ok, path, summary, error}."""
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, diag.write_report, self.service, frontend or {})
+            return dict(result, ok=True, error="")
+        except Exception as error:  # a report must never take the plugin down
+            decky.logger.exception("[Pixel Faceplate] diagnostics failed")
+            return {"ok": False, "path": "", "summary": "", "error": "%s: %s" % (type(error).__name__, error)}
