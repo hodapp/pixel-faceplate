@@ -1,3 +1,4 @@
+# Non-Steam games (shortcuts): their app IDs and SteamGridDB art in the grid folder.
 """Non-Steam games (shortcuts): their app IDs and SteamGridDB art in the grid folder."""
 
 import os

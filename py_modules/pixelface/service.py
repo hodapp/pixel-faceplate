@@ -6,7 +6,7 @@ import os
 import threading
 import time
 
-from . import cats, gif, protocol, render
+from . import gif, pictures, protocol, render
 from .settings import for_game, parse_color
 from .transport import Link, LinkBusy, LinkError, find_port
 
@@ -37,8 +37,8 @@ ARTWORK_POLL = 5.0
 # How long sleep/shutdown handling waits for an upload or decode in progress.
 # logind's default InhibitDelayMaxSec is 5 s, so this stays well under it.
 POWER_LOCK_WAIT = 3.0
-# When no cat could be had (offline with an empty stash), try again this much later.
-CAT_RETRY = 60.0
+# When no picture could be had (offline with an empty stash), try again this much later.
+PICTURE_RETRY = 60.0
 
 
 def frame_load(rgb):
@@ -122,11 +122,16 @@ class FaceplateService:
         self._on_owner_change = on_owner_change or (lambda owner: None)
         self.handed_to = ""
         self._owner_checked = 0.0
-        # Between-games cats: the one on show and when the next one is due.
-        self.cats = cats.CatStash()
-        self.cat_frame = None
-        self.cat_due = 0.0
-        self.cat_shown_at = 0.0
+        # Between-games pictures: fetched on their own thread (see pictures.py),
+        # the one on show, and when the next one is due.
+        self.pictures = pictures.PictureFeed(on_ready=self.wake.set)
+        self.picture_frame = None
+        self.picture_label = ""
+        self.picture_due = 0.0
+        self.picture_shown_at = 0.0
+        # Steam CDN art arrives on another thread too; draw the game again when it does.
+        self.art_arrived = False
+        render.ART_FETCHED = self._art_fetched
 
     # ---- lifecycle -----------------------------------------------------
     def start(self):
@@ -159,15 +164,21 @@ class FaceplateService:
             if any(old.get(k) != self.cfg.get(k) for k in redraw):
                 self.last_hash = None
                 self.last_aura = None
-            if old.get("cat_interval") != self.cfg.get("cat_interval") and self.cat_frame is not None:
-                self.cat_due = self.cat_shown_at + self.cfg["cat_interval"] * 60
+            if old.get("picture_interval") != self.cfg.get("picture_interval") and self.picture_frame is not None:
+                self.picture_due = self.picture_shown_at + self.cfg["picture_interval"] * 60
+            if old.get("picture_source") != self.cfg.get("picture_source"):
+                self.picture_due = 0.0  # show the new kind now
             if old.get("brightness") != self.cfg.get("brightness"):
                 self.applied_brightness = None
         self.wake.set()
 
-    def next_cat(self):
-        """Show a different cat now (the panel's "Next cat" button)."""
-        self.cat_due = 0.0
+    def next_picture(self):
+        """Show a different picture now (the panel's "Next picture" button)."""
+        self.picture_due = 0.0
+        self.wake.set()
+
+    def _art_fetched(self):
+        self.art_arrived = True
         self.wake.set()
 
     def game_event(self, appid, running):
@@ -299,9 +310,32 @@ class FaceplateService:
             self.image_cache[key] = render.decode_image(path, fill=fill) if path else None
         return self.image_cache[key]
 
+    def _picture_step(self, cfg, missing):
+        """Show the between-games picture, asking for a new one when it's due; None if there's none yet."""
+        now = time.monotonic()
+        if (self.picture_frame is None or now >= self.picture_due) and not self.pictures.busy():
+            self.pictures.request(cfg["picture_source"])
+        ready = self.pictures.take()
+        if ready is not None:
+            frame, label = ready
+            if frame is not None:
+                self.picture_frame, self.picture_label = frame, label
+                self.picture_shown_at = now
+                self.picture_due = now + cfg["picture_interval"] * 60
+            else:
+                self.picture_due = now + PICTURE_RETRY
+        if self.picture_frame is None:
+            return None
+        self._upload(self.picture_frame)
+        self._set("running", missing or "no game running, showing %s" % self.picture_label)
+        return max(1.0, min(ARTWORK_POLL, self.picture_due - time.monotonic()))
+
     def _artwork_frame(self, appid, cfg):
         if not appid:
             return None
+        if self.art_arrived:
+            self.art_arrived = False
+            self.image_cache.clear()  # draw it again with what just downloaded
         key = ("app", appid, cfg["art_style"], cfg["logo_position"])
         if key not in self.image_cache:
             self.image_cache.clear()
@@ -358,22 +392,11 @@ class FaceplateService:
                 # Nothing running (or no art found for this game).
                 idle = cfg["artwork_idle"]
                 missing = "no artwork found for app %d" % appid if appid else ""
-                if idle == "cats":
-                    now = time.monotonic()
-                    if self.cat_frame is None or now >= self.cat_due:
-                        frame = self.cats.next_frame()
-                        if frame is not None:
-                            self.cat_frame = frame
-                            self.cat_shown_at = now
-                            self.cat_due = now + cfg["cat_interval"] * 60
-                        else:
-                            self.cat_due = now + CAT_RETRY
-                    if self.cat_frame is not None:
-                        self._upload(self.cat_frame)
-                        self._set("running", missing or "no game running, showing a cat (from %s)" % (
-                            self.cats.source or "earlier"))
-                        return max(1.0, min(ARTWORK_POLL, self.cat_due - time.monotonic()))
-                    idle = "steam"  # no cat to be had yet
+                if idle == "pictures":
+                    delay = self._picture_step(cfg, missing)
+                    if delay is not None:
+                        return delay
+                    idle = "steam"  # no picture to be had yet
                 if idle == "steam":
                     logo = self._steam_logo()
                     if logo is not None:

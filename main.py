@@ -11,7 +11,7 @@ import decky
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_modules"))
 
 from pixelface import __version__  # noqa: E402
-from pixelface import cats, diag, render  # noqa: E402
+from pixelface import diag, pictures, render  # noqa: E402
 from pixelface.handoff import faceplate_owner  # noqa: E402
 from pixelface.power_events import PowerEvents  # noqa: E402
 from pixelface.service import FaceplateService  # noqa: E402
@@ -28,8 +28,8 @@ class Plugin:
         # Art fetched from Steam's CDN for games the local library cache lacks.
         runtime = getattr(decky, "DECKY_PLUGIN_RUNTIME_DIR", decky.DECKY_PLUGIN_SETTINGS_DIR)
         render.ART_DOWNLOAD_DIR = os.path.join(runtime, "art")
-        # Cat photos for between games, with a stash for when there's no network.
-        cats.CATS_DIR = os.path.join(runtime, "cats")
+        # Pictures for between games, each source with a stash for when there's no network.
+        pictures.PICTURES_DIR = runtime
         plugins_dir = os.path.dirname(decky.DECKY_PLUGIN_DIR)
         self.power = PowerEvents(self.service_power_event, decky.logger)
         self.service = FaceplateService(
@@ -92,8 +92,8 @@ class Plugin:
         self.service.configure(values)
         return {"ok": True, "error": "", "status": self.service.status()}
 
-    async def next_cat(self):
-        self.service.next_cat()
+    async def next_picture(self):
+        self.service.next_picture()
         return True
 
     async def write_diagnostics(self, frontend: dict = None):

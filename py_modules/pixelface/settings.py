@@ -10,10 +10,13 @@ DEFAULTS = {
     "mode": "off",
     "brightness": 60,
     # Artwork mode with no game running: the Steam logo (one write per game
-    # exit), the clock (a write a minute), keep the last game's picture, or a
-    # random cat photo, a new one every cat_interval minutes.
+    # exit), the clock (a write a minute), keep the last game's picture, or
+    # random pictures, a new one every picture_interval minutes.
     "artwork_idle": "steam",
-    "cat_interval": 10,
+    # Where the pictures come from: "mix" takes turns between space, earth,
+    # art and sky, or one of those, or cats (see pictures.py).
+    "picture_source": "mix",
+    "picture_interval": 10,
     # How a game's art is drawn: logo_dim (logo over a darkened band, so the
     # title reads on busy art), logo (no band), art (no logo) or logo_only.
     "art_style": "logo_dim",
@@ -38,7 +41,8 @@ DEFAULTS = {
 }
 
 SLEEP_ACTIONS = ("off", "dim", "keep")
-IDLE_CHOICES = ("steam", "clock", "keep", "cats")
+IDLE_CHOICES = ("steam", "clock", "keep", "pictures")
+PICTURE_SOURCES = ("mix", "cats", "space", "earth", "art", "sky")
 ART_STYLES = ("logo_dim", "logo", "art", "logo_only")
 LOGO_POSITIONS = ("bottom", "center", "top")
 GAME_KEYS = ("art_style", "logo_position")
@@ -79,6 +83,10 @@ def validate(changes):
             if value not in IDLE_CHOICES:
                 raise ValueError("artwork_idle must be one of %s" % ", ".join(IDLE_CHOICES))
             out[key] = value
+        elif key == "picture_source":
+            if value not in PICTURE_SOURCES:
+                raise ValueError("picture_source must be one of %s" % ", ".join(PICTURE_SOURCES))
+            out[key] = value
         elif key == "art_style":
             if value not in ART_STYLES:
                 raise ValueError("art_style must be one of %s" % ", ".join(ART_STYLES))
@@ -91,8 +99,8 @@ def validate(changes):
             out[key] = bool(value)
         elif key == "brightness":
             out[key] = _int(value, "brightness", 0, 100)
-        elif key == "cat_interval":
-            out[key] = _int(value, "cat interval", 1, 1440)
+        elif key == "picture_interval":
+            out[key] = _int(value, "picture interval", 1, 1440)
         elif key == "aura_interval":
             out[key] = _int(value, "aura interval", 30, 600)
         elif key == "clock_color":
@@ -155,6 +163,12 @@ class SettingsStore:
         # 0.1.x saved the clock color under its British spelling.
         if "clock_colour" in stored:
             stored.setdefault("clock_color", stored.pop("clock_colour"))
+        # Built from main after 0.2.1, cats were their own idle choice; they're one picture source now.
+        if stored.get("artwork_idle") == "cats":
+            stored["artwork_idle"] = "pictures"
+            stored.setdefault("picture_source", "cats")
+        if "cat_interval" in stored:
+            stored.setdefault("picture_interval", stored.pop("cat_interval"))
         if stored.get("logo_position") == "centre":
             stored["logo_position"] = "center"
         for key, value in stored.items():

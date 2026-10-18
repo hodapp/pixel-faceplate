@@ -6,7 +6,9 @@ import re
 import shutil
 import subprocess
 import ssl
+import threading
 import time
+import urllib.error
 import urllib.request
 
 from .protocol import HEIGHT, WIDTH
@@ -216,6 +218,9 @@ def decode_image(path, fill=True, ybias=0.5):
     wide = w * HEIGHT > h * WIDTH
     if fill:
         tw, th = (max(WIDTH, round(w * HEIGHT / h)), HEIGHT) if wide else (WIDTH, max(HEIGHT, round(h * WIDTH / w)))
+        # A freak shape (say 1x100000 from a picture off the web) would scale
+        # to a strip hundreds of MB big; past this it's squeezed instead.
+        tw, th = min(tw, MAX_SCALED), min(th, MAX_SCALED)
     else:
         tw, th = (WIDTH, max(1, round(h * WIDTH / w))) if wide else (max(1, round(w * HEIGHT / h)), HEIGHT)
     rgb = _gst_decode(path, tw, th)
@@ -380,6 +385,8 @@ ART_STEMS = {
 # Steam's grid folder names custom art <appid><suffix>.<ext>.
 GRID_SUFFIX = {"hero": "_hero", "header": "", "capsule": "p", "logo": "_logo"}
 MAX_ART_BYTES = 12 * 1024 * 1024
+# Largest side an image is scaled to before the crop (see decode_image).
+MAX_SCALED = 2048
 # Midtone lift for game art. Even at full brightness the panel is much dimmer
 # than the Steam Machine's light bar, so midtones get pushed up. The power cap
 # in service.py still trims any frame that would draw too much.
@@ -463,7 +470,7 @@ def find_art(appid, kind, root=STEAM_ROOT):
                          + [os.path.join(cache, "%d_%s" % (appid, name))]):
                 if _usable(path):
                     return path
-    return downloaded_art(appid, kind)
+    return fetch_art_later(appid, kind)
 
 
 # Steam games whose art isn't in the local library cache (it only holds what
@@ -492,7 +499,11 @@ def _looks_like_image(data):
 
 
 def downloaded_art(appid, kind, directory=None, fetch=None):
-    """Path of art fetched from Steam's CDN (fetching it now if needed), or None."""
+    """Path of art fetched from Steam's CDN (fetching it now if needed), or None.
+
+    A miss is only remembered when the CDN said so. With no network nothing
+    is written, so the art turns up once the network is back.
+    """
     directory = directory or ART_DOWNLOAD_DIR
     if not directory or not appid or appid & SHORTCUT_BIT or kind not in CDN_NAMES:
         return None
@@ -507,9 +518,12 @@ def downloaded_art(appid, kind, directory=None, fetch=None):
     except OSError:
         pass
     fetch = fetch or _fetch
+    answered = True
     for name in CDN_NAMES[kind]:
         for host in CDN_HOSTS:
             data = fetch(host % (appid, name))
+            if data is None:
+                answered = False  # no answer at all, not a "not found"
             if data and len(data) <= MAX_ART_BYTES and _looks_like_image(data):
                 path = "%s.%s" % (base, "png" if data[:4] == b"\x89PNG" else "jpg")
                 try:
@@ -520,12 +534,56 @@ def downloaded_art(appid, kind, directory=None, fetch=None):
                 except OSError:
                     return None
                 return path
+    if not answered:
+        return None
     try:
         os.makedirs(directory, exist_ok=True)
         with open(missing, "w"):
             pass
     except OSError:
         pass
+    return None
+
+
+# The worker holds the panel lock while it draws, and sleep only waits 3 s
+# for it, so CDN art is fetched on a thread of its own. find_art returns
+# what's already here; when a download lands, ART_FETCHED tells the service
+# to draw again.
+ART_FETCHED = None  # set by the service
+_art_pending = set()
+_art_pending_lock = threading.Lock()
+
+
+def fetch_art_later(appid, kind):
+    """Downloaded art if it's here already; otherwise start fetching it and return None."""
+    directory = ART_DOWNLOAD_DIR
+    if not directory or not appid or appid & SHORTCUT_BIT or kind not in CDN_NAMES:
+        return None
+    base = os.path.join(directory, "%d_%s" % (appid, kind))
+    for ext in ("jpg", "png"):
+        if _usable("%s.%s" % (base, ext)):
+            return "%s.%s" % (base, ext)
+    try:
+        if time.time() - os.path.getmtime(base + ".missing") < CDN_RETRY:
+            return None
+    except OSError:
+        pass
+    key = (appid, kind)
+    with _art_pending_lock:
+        if key in _art_pending:
+            return None
+        _art_pending.add(key)
+
+    def work():
+        try:
+            path = downloaded_art(appid, kind, directory)
+        finally:
+            with _art_pending_lock:
+                _art_pending.discard(key)
+        if path and ART_FETCHED:
+            ART_FETCHED()
+
+    threading.Thread(target=work, name="pixel-faceplate-art", daemon=True).start()
     return None
 
 
@@ -544,12 +602,15 @@ def _ssl_context():
 
 
 def _fetch(url):
+    """The body of an HTTPS GET, b"" if the server said it isn't there, None if no answer."""
     try:
         request = urllib.request.Request(url, headers={"User-Agent": "pixel-faceplate"})
         with urllib.request.urlopen(request, timeout=CDN_TIMEOUT, context=_ssl_context()) as response:
             if response.status != 200:
                 return None
             return response.read(MAX_ART_BYTES + 1)
+    except urllib.error.HTTPError as error:
+        return b"" if error.code in (403, 404, 410) else None
     except (OSError, ValueError):
         return None
 

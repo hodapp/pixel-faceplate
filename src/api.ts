@@ -3,7 +3,8 @@ import { callable } from "@decky/api";
 
 export type Mode = "off" | "artwork" | "clock" | "aura" | "image";
 export type SleepAction = "off" | "dim" | "keep";
-export type IdleChoice = "steam" | "clock" | "keep" | "cats";
+export type IdleChoice = "steam" | "clock" | "keep" | "pictures";
+export type PictureSource = "mix" | "cats" | "space" | "earth" | "art" | "sky";
 export type ArtStyle = "logo_dim" | "logo" | "art" | "logo_only";
 export type LogoPosition = "bottom" | "center" | "top";
 
@@ -20,7 +21,8 @@ export interface Settings {
   sleep_action: SleepAction;
   shutdown_action: SleepAction;
   rotate: boolean;
-  cat_interval: number;
+  picture_source: PictureSource;
+  picture_interval: number;
   game_profiles: Record<string, GameProfile>;
 }
 
@@ -59,7 +61,7 @@ export const saveGameSettings = callable<[appid: number, changes: Partial<GamePr
   "save_game_settings",
 );
 
-export const nextCat = callable<[], boolean>("next_cat");
+export const nextPicture = callable<[], boolean>("next_picture");
 
 export interface DiagnosticsResult {
   ok: boolean;

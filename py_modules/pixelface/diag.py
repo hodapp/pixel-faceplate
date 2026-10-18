@@ -1,5 +1,6 @@
 # A plain-text report of what the plugin sees, for when game art doesn't show up.
-# Written from the Quick Access panel while a game runs; it only reads.
+# Written from the Quick Access panel while a game runs. It only reads, though
+# looking up a game's art can start a download from Steam's CDN.
 
 import glob
 import json

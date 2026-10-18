@@ -19,13 +19,14 @@ import {
   IdleChoice,
   LogoPosition,
   Mode,
+  PictureSource,
   SaveResult,
   Settings,
   SleepAction,
   Status,
   gameEvent,
   getStatus,
-  nextCat,
+  nextPicture,
   saveGameSettings,
   saveSettings,
   writeDiagnostics,
@@ -53,7 +54,16 @@ const IDLE_CHOICES: { data: IdleChoice; label: string }[] = [
   { data: "steam", label: "Steam logo" },
   { data: "clock", label: "Clock" },
   { data: "keep", label: "Keep the last game's picture" },
-  { data: "cats", label: "Random cats" },
+  { data: "pictures", label: "Random pictures" },
+];
+
+const PICTURE_SOURCES: { data: PictureSource; label: string }[] = [
+  { data: "mix", label: "A bit of everything" },
+  { data: "space", label: "Space photos (NASA)" },
+  { data: "earth", label: "Whole Earth (NASA EPIC)" },
+  { data: "art", label: "Paintings (Art Institute of Chicago)" },
+  { data: "sky", label: "Night sky, tonight's moon" },
+  { data: "cats", label: "Cats" },
 ];
 
 const ART_STYLES: { data: ArtStyle; label: string }[] = [
@@ -69,7 +79,7 @@ const LOGO_POSITIONS: { data: LogoPosition; label: string }[] = [
   { data: "bottom", label: "Bottom" },
 ];
 
-const CAT_INTERVALS = [
+const PICTURE_INTERVALS = [
   { data: 1, label: "Every minute" },
   { data: 3, label: "Every 3 minutes" },
   { data: 5, label: "Every 5 minutes" },
@@ -262,20 +272,29 @@ function Content() {
                 onChange={(option) => save({ artwork_idle: option.data as IdleChoice })}
               />
             </PanelSectionRow>
-            {s.artwork_idle === "cats" && (
+            {s.artwork_idle === "pictures" && (
               <>
                 <PanelSectionRow>
                   <DropdownItem
-                    label="New cat"
-                    description="Each new cat is a flash write; with no network, cats you've already seen come back"
-                    rgOptions={CAT_INTERVALS}
-                    selectedOption={s.cat_interval}
-                    onChange={(option) => save({ cat_interval: option.data as number })}
+                    label="Pictures of"
+                    description={s.picture_source === "sky" ? "Drawn here, no network needed" : undefined}
+                    rgOptions={PICTURE_SOURCES}
+                    selectedOption={s.picture_source}
+                    onChange={(option) => save({ picture_source: option.data as PictureSource })}
                   />
                 </PanelSectionRow>
                 <PanelSectionRow>
-                  <ButtonItem layout="below" onClick={() => nextCat().catch((e) => setError(String(e)))}>
-                    Next cat
+                  <DropdownItem
+                    label="New picture"
+                    description="Each new picture is a flash write; with no network, ones you've already seen come back"
+                    rgOptions={PICTURE_INTERVALS}
+                    selectedOption={s.picture_interval}
+                    onChange={(option) => save({ picture_interval: option.data as number })}
+                  />
+                </PanelSectionRow>
+                <PanelSectionRow>
+                  <ButtonItem layout="below" onClick={() => nextPicture().catch((e) => setError(String(e)))}>
+                    Next picture
                   </ButtonItem>
                 </PanelSectionRow>
               </>
