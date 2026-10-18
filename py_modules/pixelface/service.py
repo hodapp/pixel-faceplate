@@ -274,21 +274,27 @@ class FaceplateService:
         self.applied_brightness = level
 
     def _upload(self, rgb):
-        if self.rotate:
+        """rgb is one frame, or a gif.PixelAnimation the panel loops by itself (still one flash write)."""
+        animation = rgb if isinstance(rgb, gif.PixelAnimation) else None
+        if animation:
+            if self.rotate:
+                animation = animation.rotated(render.rotate)
+            rgb = animation.base
+        elif self.rotate:
             rgb = render.rotate(rgb)
-        digest = hashlib.blake2b(rgb, digest_size=16).digest()
+        digest = hashlib.blake2b(animation.key() if animation else rgb, digest_size=16).digest()
         if digest == self.last_hash:
             return False
         gap = time.monotonic() - self.last_upload
         if gap < MIN_UPLOAD_GAP:
             time.sleep(MIN_UPLOAD_GAP - gap)
-        load = frame_load(rgb)
+        load = frame_load(rgb)  # an animation only ever dims from its first frame
         target = safe_brightness(self.wanted_brightness, load)
         # Dim before a bright frame goes up, never after: the panel stores
         # both and replays them at boot.
         if self.applied_brightness is None or target < self.applied_brightness:
             self._apply_brightness(target)
-        data = encode_frame(rgb)
+        data = animation.encode() if animation else encode_frame(rgb)
         started = time.monotonic()
         wrote = self.link.send_gif(data)
         self.last_upload = time.monotonic()

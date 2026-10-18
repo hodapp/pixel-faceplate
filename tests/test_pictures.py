@@ -145,35 +145,38 @@ class StashTest(unittest.TestCase):
         self.assertEqual(where, "TheCatAPI")
 
 
-class NightSkyTest(unittest.TestCase):
-    def test_moon_phase(self):
-        utc = datetime.timezone.utc
-        self.assertAlmostEqual(pictures.moon_phase(pictures.NEW_MOON), 0.0)
-        # Full moon 2026-10-26 04:12 UTC, new moon 2026-11-09 07:02 UTC.
-        self.assertAlmostEqual(pictures.moon_phase(datetime.datetime(2026, 10, 26, 4, 12, tzinfo=utc)), 0.5, delta=0.02)
-        self.assertLess(min(pictures.moon_phase(datetime.datetime(2026, 11, 9, 7, 2, tzinfo=utc)),
-                            1 - pictures.moon_phase(datetime.datetime(2026, 11, 9, 7, 2, tzinfo=utc))), 0.03)  # the real moon runs up to ~14 h off the average
+class TwinklingStarsTest(unittest.TestCase):
+    def test_slow_small_steps_back_to_the_start(self):
+        stars = pictures.twinkling_stars(random.Random(1))
+        self.assertEqual(len(stars.base), FRAME)
+        self.assertTrue(stars.changes)
+        frame = bytearray(stars.base)
+        for x, y, color, delay in stars.changes:
+            i = 3 * (y * 64 + x)
+            self.assertTrue(frame[i:i + 3] != bytes(color))
+            self.assertLessEqual(max(abs(a - b) for a, b in zip(frame[i:i + 3], color)), 4)  # one panel step
+            self.assertLessEqual(sum(color), sum(frame[i:i + 3]) + 12)  # never brighter than it started
+            self.assertGreaterEqual(delay, pictures.TWINKLE_STEP_CS)
+            frame[i:i + 3] = bytes(color)
+        self.assertEqual(bytes(frame), stars.base)  # so the loop has no jump
 
-    def lit(self, phase):
-        frame = pictures.night_sky(phase, random.Random(1))
-        return sum(1 for i in range(0, FRAME, 3) if frame[i] >= 100)
+    def test_an_hour_in_one_small_gif(self):
+        for seed in range(20):
+            stars = pictures.twinkling_stars(random.Random(seed))
+            data = stars.encode()
+            self.assertTrue(data.startswith(b"GIF89a"))
+            self.assertIn(b"NETSCAPE2.0", data)
+            self.assertEqual(data.count(b"\x21\xF9\x04"), len(stars.changes) + 1)
+            self.assertLess(len(data), 45000)  # ~1.5 s to upload; sleep waits 3 s for the panel
+            self.assertLessEqual(stars.first_delay_cs + sum(c[3] for c in stars.changes), pictures.TWINKLE_LOOP_CS)
 
-    def test_moon_grows_and_shrinks(self):
-        self.assertEqual(len(pictures.night_sky(0.3, random.Random(1))), FRAME)
-        new, quarter, full = self.lit(0.0), self.lit(0.25), self.lit(0.5)
-        self.assertLess(new, quarter)
-        self.assertLess(quarter, full)
-        self.assertAlmostEqual(self.lit(0.75), quarter, delta=quarter * 0.2)
-
-    def test_waxing_lights_the_right_side(self):
-        # Same seed, so the moon sits in the same place; compare where its lit pixels are.
-        frame = pictures.night_sky(0.25, random.Random(2))
-        bright = [i // 3 % 64 for i in range(0, FRAME, 3) if frame[i] >= 140]
-        self.assertTrue(bright)
-        waning = pictures.night_sky(0.75, random.Random(2))
-        bright_waning = [i // 3 % 64 for i in range(0, FRAME, 3) if waning[i] >= 140]
-        self.assertGreater(sum(bright) / len(bright), sum(bright_waning) / len(bright_waning))
-
+    def test_rotated_moves_the_changes_too(self):
+        stars = pictures.twinkling_stars(random.Random(3))
+        turned = stars.rotated(render.rotate)
+        self.assertEqual(turned.base, render.rotate(stars.base))
+        x, y, color, _ = stars.changes[0]
+        tx, ty, tcolor, _ = turned.changes[0]
+        self.assertEqual((tx, ty, tcolor), (63 - x, 53 - y, color))
 
 class FakeSource:
     def __init__(self, name, frames=True):
@@ -211,7 +214,7 @@ class FeedTest(unittest.TestCase):
             feed.request("mix")
             frame, label = feed.take()
             self.assertTrue(frame)
-            self.assertTrue(label.startswith("the night sky"))
+            self.assertTrue(label.startswith("twinkling stars"))
 
     def test_one_source_offline_says_so(self):
         feed = pictures.PictureFeed(fake_sources("space"), inline=True)
@@ -279,6 +282,20 @@ class ServicePicturesTest(unittest.TestCase):
 
     def gifs(self):
         return len(FakeLink.instances[0].gifs)
+
+    def test_stars_go_up_once_as_one_animation(self):
+        for rotate in (False, True):
+            FakeLink.instances = []
+            svc = service.FaceplateService(
+                dict(DEFAULTS, mode="artwork", artwork_idle="pictures", picture_source="sky", rotate=rotate),
+                link_factory=FakeLink)
+            svc.pictures = pictures.PictureFeed(dict(fake_sources(), sky=pictures.SkySource()), inline=True)
+            svc.step()
+            svc.step()
+            sent = FakeLink.instances[0].gifs
+            self.assertEqual(len(sent), 1)
+            self.assertGreater(sent[0].count(b"\x21\xF9\x04"), 100)
+            self.assertIn("twinkling stars", svc.detail)
 
     def test_one_picture_until_the_interval_is_up(self):
         self.svc.step()

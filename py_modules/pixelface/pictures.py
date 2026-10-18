@@ -1,19 +1,17 @@
-# Random pictures for the panel between games: cats, space, Earth, paintings, a night sky.
+# Random pictures for the panel between games: cats, space, Earth, paintings, twinkling stars.
 #
 # Photos come from free public APIs that need no key (TheCatAPI and CATAAS,
 # NASA's image library, NASA EPIC, the Art Institute of Chicago). Each one
 # keeps a small stash in the plugin's folder, so with no network a picture
-# already seen comes back instead. The night sky is drawn here and never
-# touches the network. Every new picture is one flash write, so they change
+# already seen comes back instead. The stars are drawn here and never
+# touch the network. Every new picture is one flash write, so they change
 # every few minutes, not faster.
 #
 # The fetching happens on its own thread (PictureFeed). The service holds
 # the panel lock while it works, and sleep only waits 3 s for that lock, so a
 # slow download there would leave the screen on all night.
 
-import datetime
 import json
-import math
 import os
 import random
 import re
@@ -21,7 +19,7 @@ import threading
 import time
 import urllib.parse
 
-from . import render
+from . import gif, render
 from .protocol import HEIGHT, WIDTH
 
 PICTURES_DIR = None  # set by main.py; None turns fetching off
@@ -144,69 +142,68 @@ def download_art(fetch):
     return None, ""
 
 
-# ---- the night sky, drawn here ------------------------------------------
+# ---- twinkling stars, drawn here ---------------------------------------
 
-# A new moon to count from (2000-01-06 18:14 UTC) and the average lunar month.
-NEW_MOON = datetime.datetime(2000, 1, 6, 18, 14, tzinfo=datetime.timezone.utc)
-SYNODIC_DAYS = 29.530588853
+# The stars go up once and the panel loops them by itself, ~20 minutes
+# before it repeats. One star at a time fades to a quarter or half and
+# back, one panel step every 0.75 s. Swapping whole frames looked busy even
+# 10 s apart, and shallower fades at 1.5 s didn't show at all. Each step is
+# a 1x1 image (gif.PixelAnimation), so the whole loop stays near 40 KB: an
+# upload that size takes ~1.5 s, and sleep only waits 3 s for the panel.
+TWINKLE_STEP_CS = 75
+TWINKLE_LOOP_CS = 360000  # an hour at most; the change cap ends it first
+TWINKLE_MAX_CHANGES = 1600
+TINTS = ((255, 255, 255), (200, 215, 255), (255, 225, 190))
 
 
-def moon_phase(when=None):
-    """Where the moon is in its month: 0 new, 0.25 first quarter, 0.5 full, 0.75 last quarter."""
-    when = when or datetime.datetime.now(datetime.timezone.utc)
-    days = (when - NEW_MOON).total_seconds() / 86400.0
-    return (days / SYNODIC_DAYS) % 1.0
+def _star(tint, level):
+    # Levels on the panel's 64 steps: three tints of 64 fit one GIF palette.
+    level = max(0, min(252, level // 4 * 4))
+    return tuple(c * level // 255 for c in tint)
 
 
-def night_sky(phase=None, rng=None):
-    """A 64x54 sky: stars, sometimes a faint Milky Way, and the moon as it is tonight."""
+def twinkling_stars(rng=None):
+    """64x54 stars (sometimes a faint Milky Way) that twinkle very slowly, as a gif.PixelAnimation."""
     rng = rng or random.Random()
-    phase = moon_phase() if phase is None else phase
-    frame = bytearray(render.FRAME_BYTES)
-
-    def add(x, y, r, g, b):
-        if 0 <= x < WIDTH and 0 <= y < HEIGHT:
-            i = 3 * (y * WIDTH + x)
-            frame[i] = min(255, frame[i] + r)
-            frame[i + 1] = min(255, frame[i + 1] + g)
-            frame[i + 2] = min(255, frame[i + 2] + b)
-
+    glow = {}
     if rng.random() < 0.5:
-        # A diagonal band of very dim stars.
+        # A diagonal band of very dim stars. These don't twinkle.
         slope, offset = rng.uniform(-0.8, 0.8), rng.uniform(10, 44)
         for _ in range(260):
             x = rng.randrange(WIDTH)
             y = int(offset + slope * (x - WIDTH / 2) + rng.gauss(0, 4))
-            level = rng.randint(6, 18)
-            add(x, y, level, level, level + 6)
-    tints = ((255, 255, 255), (200, 215, 255), (255, 235, 200), (255, 210, 180))
-    for _ in range(rng.randint(45, 75)):
+            if 0 <= y < HEIGHT:
+                glow[x, y] = glow.get((x, y), 0) + rng.randint(6, 18)
+    stars = {}
+    for _ in range(rng.randint(55, 85)):
         # Most stars barely show; a few are bright.
-        level = 30 + int(200 * rng.random() ** 3)
-        r, g, b = rng.choice(tints)
-        add(rng.randrange(WIDTH), rng.randrange(HEIGHT), r * level // 255, g * level // 255, b * level // 255)
+        level = (30 + int(200 * rng.random() ** 3)) // 4 * 4
+        stars[rng.randrange(WIDTH), rng.randrange(HEIGHT)] = (level, rng.choice(TINTS))
 
-    radius = 9
-    cx, cy = rng.randint(14, WIDTH - 15), rng.randint(12, HEIGHT - 13)
-    turn = math.cos(2 * math.pi * phase)
-    for y in range(-radius, radius + 1):
-        half = math.sqrt(max(0.0, radius * radius - y * y))
-        for x in range(-radius, radius + 1):
-            if x * x + y * y > radius * radius:
-                continue
-            i = 3 * ((cy + y) * WIDTH + cx + x)
-            across = x / half if half else 0.0
-            # Waxing, the right side is lit; waning, the left (northern sky).
-            lit = across > turn if phase < 0.5 else across < -turn
-            if lit:
-                # A little darker toward the edge, and a few grey "seas".
-                level = 150 + int(70 * (1 - (x * x + y * y) / (radius * radius)))
-                if (x * 7 + y * 13) % 11 < 2 and abs(x) < radius - 2:
-                    level -= 45
-                frame[i:i + 3] = bytes((level, level, max(0, level - 15)))
-            else:
-                frame[i:i + 3] = bytes((10, 10, 14))  # earthshine
-    return bytes(frame)
+    base = bytearray(render.FRAME_BYTES)
+    for (x, y), level in glow.items():
+        i = 3 * (y * WIDTH + x)
+        base[i:i + 3] = bytes(_star(TINTS[1], level))
+    for (x, y), (level, tint) in stars.items():
+        i = 3 * (y * WIDTH + x)
+        base[i:i + 3] = bytes(_star(tint, level))
+
+    twinklers = [(x, y, level, tint) for (x, y), (level, tint) in stars.items() if level >= 60]
+    first = rng.randint(300, 1500)
+    changes, total = [], first
+    while twinklers:
+        x, y, level, tint = rng.choice(twinklers)
+        down = list(range(level - 4, int(level * rng.uniform(0.25, 0.5)), -4))  # never empty at 60 and up
+        steps = down + down[-2::-1] + [level]  # down, and back to exactly where it was
+        event = [(x, y, _star(tint, l), TWINKLE_STEP_CS) for l in steps]
+        gap = rng.randint(0, 800)  # up to 8 s of nothing between twinkles
+        event[-1] = event[-1][:3] + (TWINKLE_STEP_CS + gap,)
+        took = TWINKLE_STEP_CS * len(steps) + gap
+        if len(changes) + len(event) > TWINKLE_MAX_CHANGES or total + took > TWINKLE_LOOP_CS:
+            break
+        changes += event
+        total += took
+    return gif.PixelAnimation(WIDTH, HEIGHT, base, changes, first)
 
 
 # ---- sources -------------------------------------------------------------
@@ -291,7 +288,7 @@ class SkySource:
     name = "sky"
 
     def next_frame(self):
-        return night_sky(), ""
+        return twinkling_stars(), ""
 
 
 def default_sources():
@@ -373,4 +370,4 @@ class PictureFeed:
         self.on_ready()
 
 
-LABELS = {"cats": "a cat", "space": "a space photo", "earth": "the whole Earth", "art": "a painting", "sky": "the night sky"}
+LABELS = {"cats": "a cat", "space": "a space photo", "earth": "the whole Earth", "art": "a painting", "sky": "twinkling stars"}

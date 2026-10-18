@@ -267,7 +267,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_rotate_flips_what_is_sent_and_redraws(self):
         sent = []
-        with mock.patch.object(service, "encode_frame", lambda rgb: sent.append(rgb) or rgb):
+        with mock.patch.object(service, "encode_frame", lambda rgb, *_: sent.append(rgb) or rgb):
             svc = make("clock")
             svc.step()
             svc.configure(dict(svc.cfg, rotate=True))

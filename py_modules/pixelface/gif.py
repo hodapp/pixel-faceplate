@@ -63,8 +63,7 @@ def _sub_blocks(data):
     return bytes(out)
 
 
-def encode(width, height, palette, frames, delay_cs=10, loop=True):
-    """palette: list of (r, g, b), up to 256. frames: iterables of palette indices."""
+def _header(width, height, palette):
     bits = 1
     while (1 << bits) < max(2, len(palette)):
         bits += 1
@@ -77,19 +76,70 @@ def encode(width, height, palette, frames, delay_cs=10, loop=True):
     out += width.to_bytes(2, "little") + height.to_bytes(2, "little")
     out += bytes((0x80 | (bits - 1), 0, 0))
     out += table
+    return out, max(2, bits)
+
+
+LOOP = b"\x21\xFF\x0BNETSCAPE2.0\x03\x01\x00\x00\x00"
+
+
+def _image(x, y, width, height, indices, min_code, delay_cs=None):
+    out = bytearray()
+    if delay_cs is not None:
+        # Graphic control: dispose "do not dispose", no transparency.
+        out += b"\x21\xF9\x04\x04" + int(delay_cs).to_bytes(2, "little") + b"\x00\x00"
+    out += b"\x2C" + x.to_bytes(2, "little") + y.to_bytes(2, "little")
+    out += width.to_bytes(2, "little") + height.to_bytes(2, "little") + b"\x00"
+    out.append(min_code)
+    out += _sub_blocks(_lzw(bytes(indices), min_code))
+    return out
+
+
+def encode(width, height, palette, frames, delay_cs=10, loop=True):
+    """palette: list of (r, g, b), up to 256. frames: iterables of palette indices."""
+    out, min_code = _header(width, height, palette)
     frames = list(frames)
     if loop and len(frames) > 1:
-        out += b"\x21\xFF\x0BNETSCAPE2.0\x03\x01\x00\x00\x00"
-    min_code = max(2, bits)
+        out += LOOP
     for indices in frames:
-        if len(frames) > 1:
-            # Graphic control: dispose "do not dispose", no transparency.
-            out += b"\x21\xF9\x04\x04" + int(delay_cs).to_bytes(2, "little") + b"\x00\x00"
-        out += b"\x2C" + bytes(4) + width.to_bytes(2, "little") + height.to_bytes(2, "little") + b"\x00"
-        out.append(min_code)
-        out += _sub_blocks(_lzw(bytes(indices), min_code))
+        out += _image(0, 0, width, height, indices, min_code, delay_cs if len(frames) > 1 else None)
     out.append(0x3B)
     return bytes(out)
+
+
+class PixelAnimation:
+    """A first frame, then one pixel changing at a time, looping.
+
+    Each change is a 1x1 image drawn over what's there (about 25 bytes), so
+    an hour of slow changes still makes a small GIF and one flash write.
+    changes: (x, y, (r, g, b), delay_cs). Every color has to fit one
+    256-color palette.
+    """
+
+    def __init__(self, width, height, base, changes, first_delay_cs):
+        self.width, self.height = width, height
+        self.base, self.changes, self.first_delay_cs = bytes(base), list(changes), first_delay_cs
+
+    def rotated(self, rotate_frame):
+        w, h = self.width, self.height
+        return PixelAnimation(w, h, rotate_frame(self.base),
+                              [(w - 1 - x, h - 1 - y, c, d) for x, y, c, d in self.changes], self.first_delay_cs)
+
+    def key(self):
+        return self.base + repr((self.changes, self.first_delay_cs)).encode()
+
+    def encode(self):
+        pixels = [tuple(self.base[i:i + 3]) for i in range(0, len(self.base), 3)]
+        palette = list(dict.fromkeys(pixels + [c for _, _, c, _ in self.changes]))
+        if len(palette) > 256:
+            raise ValueError("%d colors, a GIF palette holds 256" % len(palette))
+        lookup = {c: i for i, c in enumerate(palette)}
+        out, min_code = _header(self.width, self.height, palette)
+        out += LOOP
+        out += _image(0, 0, self.width, self.height, [lookup[p] for p in pixels], min_code, self.first_delay_cs)
+        for x, y, color, delay in self.changes:
+            out += _image(x, y, 1, 1, [lookup[color]], min_code, delay)
+        out.append(0x3B)
+        return bytes(out)
 
 
 # A fixed 3-3-2 palette (256 colors) for test patterns and the tools.

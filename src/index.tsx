@@ -62,7 +62,7 @@ const PICTURE_SOURCES: { data: PictureSource; label: string }[] = [
   { data: "space", label: "Space photos (NASA)" },
   { data: "earth", label: "Whole Earth (NASA EPIC)" },
   { data: "art", label: "Paintings (Art Institute of Chicago)" },
-  { data: "sky", label: "Night sky, tonight's moon" },
+  { data: "sky", label: "Twinkling stars" },
   { data: "cats", label: "Cats" },
 ];
 
