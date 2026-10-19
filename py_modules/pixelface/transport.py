@@ -4,10 +4,14 @@ import fcntl
 import glob
 import os
 import select
-import termios
 import time
 
 from . import protocol
+
+try:
+    import termios
+except ImportError:  # Decky 3.3's bundled Python has no termios
+    from . import termios_compat as termios
 
 # The CH340 has no serial number, so match on VID:PID through sysfs.
 CH340 = ("1a86", "7523")
