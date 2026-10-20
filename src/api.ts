@@ -72,3 +72,26 @@ export interface DiagnosticsResult {
 
 // What Steam's UI knows about the running game, passed along into the report.
 export const writeDiagnostics = callable<[frontend: Record<string, unknown>], DiagnosticsResult>("write_diagnostics");
+
+export interface UpdateState {
+  current: string;
+  latest: string;
+  available: boolean;
+  notes: string;
+  page: string;
+  checked_at: number;
+  error: string;
+}
+
+export interface PreparedUpdate {
+  ok: boolean;
+  path?: string;
+  version?: string;
+  sha256?: string;
+  error: string;
+}
+
+// force=true skips the backend's 6-hour cache ("Check now").
+export const checkUpdate = callable<[force: boolean], UpdateState>("check_update");
+// Downloads and checks the ZIP; the panel then hands it to Decky's installer.
+export const prepareUpdate = callable<[], PreparedUpdate>("prepare_update");

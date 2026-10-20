@@ -11,7 +11,7 @@ import decky
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_modules"))
 
 from pixelface import __version__  # noqa: E402
-from pixelface import diag, pictures, render  # noqa: E402
+from pixelface import diag, pictures, render, updates  # noqa: E402
 from pixelface.handoff import faceplate_owner  # noqa: E402
 from pixelface.power_events import PowerEvents  # noqa: E402
 from pixelface.service import FaceplateService  # noqa: E402
@@ -30,6 +30,8 @@ class Plugin:
         render.ART_DOWNLOAD_DIR = os.path.join(runtime, "art")
         # Pictures for between games, each source with a stash for when there's no network.
         pictures.PICTURES_DIR = runtime
+        updates.DOWNLOAD_DIR = runtime
+        self.updater = updates.Updater(lambda msg: decky.logger.info("[Pixel Faceplate] " + msg))
         plugins_dir = os.path.dirname(decky.DECKY_PLUGIN_DIR)
         self.power = PowerEvents(self.service_power_event, decky.logger)
         self.service = FaceplateService(
@@ -96,10 +98,18 @@ class Plugin:
         self.service.next_picture()
         return True
 
+    async def check_update(self, force: bool = False):
+        """Latest release vs ours: {current, latest, available, notes, page, checked_at, error}."""
+        return await asyncio.get_running_loop().run_in_executor(None, self.updater.check, bool(force))
+
+    async def prepare_update(self):
+        """Download and check the new ZIP; the panel passes the result to Decky's installer."""
+        return await asyncio.get_running_loop().run_in_executor(None, self.updater.prepare)
+
     async def write_diagnostics(self, frontend: dict = None):
         """Write ~/pixel-faceplate-diagnostics.txt; returns {ok, path, summary, error}."""
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None, diag.write_report, self.service, frontend or {})
             return dict(result, ok=True, error="")
         except Exception as error:  # a report must never take the plugin down

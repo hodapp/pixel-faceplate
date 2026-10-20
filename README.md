@@ -26,13 +26,13 @@ The rest of this page is the plugin, which only sends the panel something when i
 
 > **Use at your own risk.** I put this together over coffee one morning, poking at the faceplate, and it has only been tested on my own Steam Machine, doing what I do with it. You're welcome to install it and use it, but I don't consider it ready for wide distribution and I'm not submitting it to the Decky store. I'm old as dirt and was a software engineer in a past life. These days I do this for fun, including a lot of custom ESP32 firmware for smart home stuff around my house, so I think it's in decent shape. I'm mostly sharing it so the next person who wants to do cool stuff with this panel doesn't have to start from scratch. Still, it talks directly to hardware that stores everything in flash and can brown out a USB port. You've been warned.
 
-> **This is most likely the last version.** I'm still working on the hardware side, but anything new will go to [GabeCubeAura](https://github.com/Alyenax/GabeCubeAura) as pull requests instead of into this plugin. Updating this one by hand is a pain, and GabeCubeAura seems like a better home for it. Whether GabeCubeAura takes faceplate support is up to its author. If it does, this plugin steps aside on its own (0.2.1 or newer) and you can uninstall it. Until then, update this one or leave it as it is, whichever you like.
+> **Where this is going.** New faceplate stuff will most likely still go to [GabeCubeAura](https://github.com/Alyenax/GabeCubeAura) as pull requests, if it wants them. But I'm keeping this plugin working when something breaks it, like the Decky 3.3.0 update did, and since 0.3.0 it updates itself, so it's totally fine to just stay on it. Whether GabeCubeAura takes faceplate support is up to its author. If it does, this plugin steps aside on its own (0.2.1 or newer) and you can uninstall it.
 
 ## TL;DR
 
 ### What you need
 
-- A Steam Machine running SteamOS with [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) installed. Tested on SteamOS 3.8.28 with Decky 3.2.10.
+- A Steam Machine running SteamOS with [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) installed. Tested on SteamOS 3.8.28 with Decky 3.3.0, and it still works on 3.2.10.
 - The JSAUX Pixel Matrix Faceplate, plugged in with the USB cable it came with.
 - That's it. The plugin only uses Python's standard library and GStreamer, which both ship with SteamOS, so there's nothing to pip install and it doesn't need root.
 
@@ -99,13 +99,15 @@ systemctl --user disable --now jsaux-matrix-hub
 1. Make sure the faceplate's USB cable is plugged into the Steam Machine.
 2. Open the Quick Access menu, go to Decky, and select Pixel Faceplate.
 3. Change Mode from Off to Game artwork.
-4. The Status section should say Connected. Start a game and its artwork should show up on the faceplate within a few seconds.
+4. The status line under it should say Connected. Start a game and its artwork should show up on the faceplate within a few seconds.
+
+Mode and brightness are right there in the Quick Access panel. Everything else is behind the Settings button, on a full screen page: Display, Game artwork, Sleep and mounting, Status and Updates.
 
 ### Updating
 
-The plugin doesn't update itself, and it isn't in the Decky store, so nothing will tell you when there's a new version. To update, download the newest `Pixel-Faceplate-v<version>.zip` from the [Releases page](https://github.com/hodapp/pixel-faceplate/releases) and install it the same way as step 5. It replaces the old version. Your settings are stored separately by Decky, so they carry over. The version you're running is shown in Decky's plugin list.
+From 0.3.0 on, the plugin checks GitHub for a new release when you open it (at most every 6 hours), or whenever you hit Check now under Settings > Updates. If there's one, tap Update. It downloads the ZIP, checks it against the sha256 GitHub publishes for it, then hands it to Decky's own installer, which asks you to confirm. It never updates by itself. Your settings are stored separately by Decky, so they carry over.
 
-It's worth updating to at least 0.2.1. That's the version that steps aside on its own once GabeCubeAura can drive the faceplate (see [If GabeCubeAura runs the faceplate](#if-gabecubeaura-runs-the-faceplate)).
+If you're on 0.2.x you have to do it by hand one last time: download `Pixel-Faceplate-v0.3.0.zip` (or anything newer) from the [Releases page](https://github.com/hodapp/pixel-faceplate/releases) and install it the same way as step 5. It replaces the old version, and after that it updates itself. The version you're running is shown in Decky's plugin list.
 
 ### Uninstalling
 
@@ -136,9 +138,9 @@ Quick Access menu > Decky > gear > Plugins, find Pixel Faceplate, and uninstall 
 - Light bar aura: Copies the Steam Machine's light bar colors onto the panel as a glow, so it follows GabeCubeAura or Steam's own LED effects. It checks once a minute by default and ignores small changes.
 - Custom image: Any PNG, JPG, GIF or BMP on the Steam Machine, cropped to fit.
 
-If your faceplate is mounted upside down so the cable comes out the right side, turn on Upside down and everything is flipped to match. The included cable won't reach from that side, so you'll need a longer one.
+If your faceplate is mounted upside down so the cable comes out the right side, turn on Upside down (Settings > Sleep and mounting) and everything is flipped to match. The included cable won't reach from that side, so you'll need a longer one.
 
-There's also a brightness slider, and a counter showing how many pictures have been written to the panel's flash, this session and in total.
+There's also a brightness slider in the Quick Access panel, and under Settings > Status a counter showing how many pictures have been written to the panel's flash, this session and in total.
 
 ### Sleep and shutdown
 
@@ -182,18 +184,19 @@ I measured the limit on USB-A with solid white: brightness 40, 50 and 60 each he
 
 ## If something goes wrong
 
+- If the plugin says "The faceplate service didn't start", its background side never came up. That's usually a Decky update changing something under it (Decky 3.3.0 did exactly that to 0.2.x). Check the [Releases page](https://github.com/hodapp/pixel-faceplate/releases) for a newer version, and if you're already on the newest one, [open an issue](https://github.com/hodapp/pixel-faceplate/issues) with the Pixel Faceplate and Decky versions it shows you.
 - If the panel says "Faceplate not found", check the cable and make sure nothing else has the serial port open (the JSAUX daemon, for example). The panel shows up as a CH340 serial device, `1a86:7523`.
 - If the panel keeps restarting, flashing or showing glitchy lines, it's probably starting up into a picture that's too bright for the port. Copy this repo's `tools` and `py_modules` folders to the Steam Machine, run `python3 tools/rescue.py` from that folder, then plug the panel into the USB-C port. The script turns the screen off the moment the panel appears, stores a black picture and turns the screen back on. After that it's safe to go back to USB-A.
 - If the status says the faceplate is in use by another app, something else is driving it, usually GabeCubeAura's faceplate support. Only one can have it at a time; turn one of them off and the other picks it up within a few seconds.
 - If the panel cycles through red, green, blue and white with scanning lines, it's in its factory test mode (holding the L pad on the board to ground at power-up starts it, and it stays on across restarts). From this repo's folder, run `python3 tools/bootprobe.py /dev/ttyUSB0 testoff` with the plugin set to Off. The test pattern includes full white, so if the panel keeps restarting on USB-A, do this on the USB-C port.
-- If a game's art doesn't show up, start the game, then press Write diagnostics report in the Status section. It writes `~/pixel-faceplate-diagnostics.txt`: which app ID the plugin got and from where (Steam's UI, launch events, `/proc`), the accounts in `loginusers.vdf`, and which folders it looked in for art.
+- If a game's art doesn't show up, start the game, then press Write diagnostics report under Settings > Status. It writes `~/pixel-faceplate-diagnostics.txt`: which app ID the plugin got and from where (Steam's UI, launch events, `/proc`), the accounts in `loginusers.vdf`, and which folders it looked in for art.
 - The plugin logs to Decky's log: `journalctl -u plugin_loader | grep "Pixel Faceplate"`
 
 ## How it works
 
 The short version: the panel is a CH340 USB serial device at 1,000,000 baud. Messages start with "DY", carry a command and a CRC, and pictures go up as GIFs in 498-byte chunks. [PROTOCOL.md](PROTOCOL.md) has every command, timing, what's on the board and what lands in flash. The rest of the docs are listed under [How this went](#how-this-went).
 
-SteamOS doesn't have Pillow or pyserial, so the plugin has its own small GIF encoder, opens the serial port with `termios`, and decodes artwork with GStreamer.
+SteamOS doesn't have Pillow or pyserial, so the plugin has its own small GIF encoder, opens the serial port with `termios` (or a tiny stand-in built on `fcntl` when Decky's Python leaves termios out, which 3.3.0's does), and decodes artwork with GStreamer.
 
 ## Building from source
 
