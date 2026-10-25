@@ -10,6 +10,10 @@ import json
 import os
 
 MARKER = os.path.join("py_modules", "signalbar", "faceplate", "__init__.py")
+# A GabeCubeAura that ships this (1.5.0 does) claims the panel only while its faceplate is
+# switched on, so for it the claim is the whole answer. Shipping the package isn't enough:
+# with its faceplate off nobody would drive the panel.
+CLAIMS = os.path.join("py_modules", "signalbar", "faceplate_claim.py")
 
 
 def _disabled(plugins_dir):
@@ -60,8 +64,8 @@ def claimant(settings_root, proc_root="/proc"):
 def faceplate_owner(plugins_dir, proc_root="/proc"):
     """Name of an enabled plugin with built-in faceplate support (GabeCubeAura), or "".
 
-    Either signal counts: the plugin ships signalbar/faceplate, or it holds a
-    live claim (for a GabeCubeAura with its own faceplate code).
+    Either signal counts: it holds a live claim, or it ships signalbar/faceplate
+    without the claim code (an older build that can't tell us when it's off).
     """
     owner = claimant(os.path.join(os.path.dirname(plugins_dir), "settings"), proc_root)
     if owner:
@@ -73,7 +77,7 @@ def faceplate_owner(plugins_dir, proc_root="/proc"):
     disabled = None
     for folder in folders:
         root = os.path.join(plugins_dir, folder)
-        if not os.path.isfile(os.path.join(root, MARKER)):
+        if not os.path.isfile(os.path.join(root, MARKER)) or os.path.isfile(os.path.join(root, CLAIMS)):
             continue
         try:
             with open(os.path.join(root, "plugin.json"), "r", encoding="utf-8") as handle:

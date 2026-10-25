@@ -219,7 +219,11 @@ Reading its source taught me most of what I needed to know about building a Deck
 
 ### If GabeCubeAura runs the faceplate
 
-I've offered GabeCubeAura the faceplate code so it can drive the panel itself. If it ever does, this plugin gets out of the way on its own: once it sees a GabeCubeAura that drives the faceplate, it lets go of the panel, stops sending pictures and stops handling sleep, and its panel just tells you to set things up in GabeCubeAura and uninstall Pixel Faceplate. If you switch GabeCubeAura off in Decky, this plugin takes over again.
+GabeCubeAura 1.5.0 has its own JSAUX faceplate support built in. While its faceplate is switched on it tells Pixel Faceplate it's using the panel, and this plugin lets go of the panel, stops sending pictures and stops handling sleep. Its panel will say to set things up in GabeCubeAura and uninstall Pixel Faceplate, but if you want this plugin back just switch GabeCubeAura's faceplate off in its settings. Within half a minute Pixel Faceplate takes the panel back with your artwork, clock and random pictures, and GabeCubeAura keeps the light bar. Switch it back on and this plugin steps aside again.
+
+Which one you use is up to you. GabeCubeAura's faceplate wants a fair bit of setup per game and per screensaver, Pixel Faceplate does the artwork with no setup at all.
+
+An older GabeCubeAura build that has faceplate code but no way to say it's on still makes this plugin step aside. If you switch GabeCubeAura off in Decky, this plugin takes over again.
 
 ## License
 

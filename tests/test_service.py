@@ -494,6 +494,15 @@ class HandoffTests(unittest.TestCase):
                 json.dump({"disabled_plugins": ["GabeCubeAura"]}, handle)
             self.assertEqual(faceplate_owner(plugins), "")
 
+    def test_a_build_that_claims_counts_only_while_it_claims(self):
+        # GabeCubeAura 1.5.0 with its faceplate switched off: no claim, so the panel is ours
+        from pixelface.handoff import faceplate_owner
+        with tempfile.TemporaryDirectory() as home:
+            plugins = os.path.join(home, "plugins")
+            self._plugin(plugins, "GabeCubeAura", "GabeCubeAura")
+            open(os.path.join(plugins, "GabeCubeAura", "py_modules", "signalbar", "faceplate_claim.py"), "w").close()
+            self.assertEqual(faceplate_owner(plugins, proc_root=os.path.join(home, "proc")), "")
+
     def test_live_claim_counts_and_a_dead_one_does_not(self):
         from pixelface.handoff import faceplate_owner
         with tempfile.TemporaryDirectory() as home:

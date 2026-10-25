@@ -36,6 +36,9 @@ TOP = "Pixel-Faceplate"
 # Opening the panel checks at most this often; "Check now" skips the wait.
 CHECK_EVERY_S = 6 * 3600
 RETRY_AFTER_ERROR_S = 5 * 60
+# Longest notes so far are v0.2.2 at about 2,300 chars, and the old 1,500 cut three releases short.
+# 8,000 leaves lots of room and the settings field scrolls anyway.
+NOTES_MAX = 8000
 TIMEOUT_S = 15
 # The ZIP is ~60 KB. Anything near this is not ours.
 MAX_ZIP_BYTES = 10 * 1024 * 1024
@@ -81,9 +84,19 @@ def pick_release(release, current=__version__):
         "asset_url": asset.get("browser_download_url", "") if asset else "",
         "sha256": sha256,
         "size": int(asset.get("size") or 0) if asset else 0,
-        "notes": (release.get("body") or "")[:1500],
+        "notes": trim_notes(release.get("body") or ""),
         "page": release.get("html_url") or RELEASES_URL,
     }
+
+
+def trim_notes(body):
+    """Notes past NOTES_MAX get cut at a line break, with a pointer to the full page."""
+    if len(body) <= NOTES_MAX:
+        return body
+    cut = body[:NOTES_MAX]
+    if "\n" in cut:
+        cut = cut[:cut.rindex("\n")]
+    return cut.rstrip() + "\n\n... (the rest is on GitHub)"
 
 
 def check_zip(path, version):

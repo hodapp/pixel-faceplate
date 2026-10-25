@@ -70,6 +70,20 @@ class PickTest(unittest.TestCase):
         self.assertFalse(updates.pick_release(release("0.2.2", data), current="0.10.0")["newer"])
         self.assertTrue(updates.pick_release(release("0.10.0", data), current="0.9.9")["newer"])
 
+    def test_notes_keep_long_bodies_whole(self):
+        data = make_zip("1.0.0")
+        rel = release("1.0.0", data)
+        rel["body"] = "line\n" * 600  # 3,000 chars, longer than any release so far
+        self.assertEqual(updates.pick_release(rel, current="0.1.0")["notes"], rel["body"])
+
+    def test_notes_past_the_cap_cut_at_a_line(self):
+        rel = release("1.0.0", make_zip("1.0.0"))
+        rel["body"] = ("x" * 99 + "\n") * 100  # 10,000 chars
+        notes = updates.pick_release(rel, current="0.1.0")["notes"]
+        self.assertLess(len(notes), updates.NOTES_MAX + 40)
+        self.assertTrue(notes.endswith("... (the rest is on GitHub)"))
+        self.assertEqual(notes.split("\n\n...")[0].split("\n")[-1], "x" * 99)
+
     def test_wrong_asset_name_is_not_offered(self):
         data = make_zip("1.0.0")
         rel = release("1.0.0", data)
